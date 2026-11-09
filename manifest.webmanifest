@@ -1,0 +1,25 @@
+{
+  "name": "D'Camisas - Inventario & Ventas",
+  "short_name": "D'Camisas",
+  "description": "Sistema móvil de control de stock y registro de ventas para D'Camisas",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#be185d",
+  "categories": ["business", "productivity", "shopping"],
+  "icons": [
+    {
+      "src": "public/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "public/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

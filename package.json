@@ -1,0 +1,32 @@
+{
+  "name": "dcamisas-app",
+  "version": "1.0.0",
+  "description": "Aplicación móvil de gestión de inventario y ventas para D'Camisas conectada a Google Sheets",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx serve . -p 3000",
+    "cap:add": "npx cap add android",
+    "cap:sync": "npx cap sync",
+    "cap:open": "npx cap open android",
+    "cap:run": "npx cap run android"
+  },
+  "keywords": [
+    "camisas",
+    "inventario",
+    "ventas",
+    "google-sheets",
+    "apps-script",
+    "mobile-app",
+    "apk",
+    "pwa"
+  ],
+  "author": "D'Camisas",
+  "license": "MIT",
+  "dependencies": {
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/core": "^6.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0"
+  }
+}
