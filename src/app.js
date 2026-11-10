@@ -14,6 +14,11 @@ const AppState = {
     mes: String(new Date().getMonth()),
     anio: String(new Date().getFullYear())
   },
+  movsFilter: {
+    mes: String(new Date().getMonth()),
+    anio: String(new Date().getFullYear())
+  },
+  movsShowAll: false,
   lastSyncTime: 0,
   filterSize: "ALL",
   filterAvailability: "ALL",
@@ -191,22 +196,28 @@ function bindGlobalEvents() {
       let val = parseInt(qtyInput.value, 10) || 1;
       if (val > 1) qtyInput.value = val - 1;
       updateStockPreview();
+      updateCalculatedPrices();
     });
     btnPlus.addEventListener("click", () => {
       let val = parseInt(qtyInput.value, 10) || 1;
       qtyInput.value = val + 1;
       updateStockPreview();
+      updateCalculatedPrices();
     });
-    qtyInput.addEventListener("input", updateStockPreview);
+    qtyInput.addEventListener("input", () => {
+      updateStockPreview();
+      updateCalculatedPrices();
+    });
   }
 
-  // Chips de cantidad rápida (+1, +5, +10)
+  // Chips de cantidad rápida (+1, +5, +10, +20)
   document.querySelectorAll(".quick-qty-chip").forEach(chip => {
     chip.addEventListener("click", () => {
       const addVal = parseInt(chip.dataset.qty, 10);
       if (addVal && qtyInput) {
         qtyInput.value = addVal;
         updateStockPreview();
+        updateCalculatedPrices();
       }
     });
   });
@@ -227,24 +238,11 @@ function bindGlobalEvents() {
     });
   });
 
-  // Cálculo en tiempo real de Precio sin IGV para SALIDA
+  // Cálculo en tiempo real de Precio sin IGV y Precio Total para SALIDA
   const precioVentaInput = document.getElementById("mov-precio-venta");
   if (precioVentaInput) {
-    const handlePrecioInput = () => {
-      const valStr = precioVentaInput.value.trim();
-      const sinIgvEl = document.getElementById("mov-precio-sin-igv");
-      if (!sinIgvEl) return;
-      if (valStr === "" || isNaN(Number(valStr)) || Number(valStr) < 0) {
-        sinIgvEl.value = "";
-      } else {
-        const val = parseFloat(valStr);
-        // Fórmula: Precio de venta − (Precio de venta × 0.18), redondeado a 2 decimales
-        const sinIgv = val - (val * 0.18);
-        sinIgvEl.value = (Math.round(sinIgv * 100) / 100).toFixed(2);
-      }
-    };
-    precioVentaInput.addEventListener("input", handlePrecioInput);
-    precioVentaInput.addEventListener("change", handlePrecioInput);
+    precioVentaInput.addEventListener("input", updateCalculatedPrices);
+    precioVentaInput.addEventListener("change", updateCalculatedPrices);
   }
 
   // Botones de Tipo de Venta (Unitario y Por Mayor - primer botón seleccionado por defecto)
@@ -344,6 +342,9 @@ function bindGlobalEvents() {
 
   // Inicializar selector de fecha con 3 desplegables (Día, Mes, Año) en Dashboard Estadístico
   initStatsDateFilters();
+
+  // Inicializar selector de fecha (Mes, Año) y paginación en Últimos Movimientos
+  initMovsDateFilters();
 
   // Modal Settings
   const saveApiBtn = document.getElementById("save-api-btn");
@@ -1466,6 +1467,89 @@ function setMovementType(tipo) {
 }
 
 /**
+ * Calcula en tiempo real el Precio sin IGV y Precio Total en base al Precio de Venta y Cantidad
+ */
+function updateCalculatedPrices() {
+  const pVentaEl = document.getElementById("mov-precio-venta");
+  const pSinIgvEl = document.getElementById("mov-precio-sin-igv");
+  const pTotalEl = document.getElementById("mov-precio-total");
+  const qtyEl = document.getElementById("mov-cantidad");
+
+  if (!pVentaEl) return;
+  const valStr = pVentaEl.value.trim();
+  const cant = parseInt(qtyEl ? qtyEl.value : 1, 10) || 1;
+
+  if (valStr === "" || isNaN(Number(valStr)) || Number(valStr) <= 0) {
+    if (pSinIgvEl) pSinIgvEl.value = "";
+    if (pTotalEl) pTotalEl.value = "";
+  } else {
+    const val = parseFloat(valStr);
+    const sinIgv = val - (val * 0.18);
+    const total = cant * val;
+
+    if (pSinIgvEl) pSinIgvEl.value = (Math.round(sinIgv * 100) / 100).toFixed(2);
+    if (pTotalEl) pTotalEl.value = (Math.round(total * 100) / 100).toFixed(2);
+  }
+}
+
+/**
+ * Bloquea o desbloquea los campos interactivos de Salida en caso de stock 0
+ * Mostrando diseño en tonos grises/plomos y deshabilitando edición
+ */
+function setSalidaFormStockBlocked(isBlocked) {
+  const movForm = document.getElementById("movement-form");
+  if (!movForm) return;
+
+  const isSalida = AppState.movementForm.tipo === "SALIDA";
+  const shouldBlock = isSalida && !!isBlocked;
+
+  if (shouldBlock) {
+    movForm.classList.add("form-out-of-stock-blocked");
+  } else {
+    movForm.classList.remove("form-out-of-stock-blocked");
+  }
+
+  // Deshabilitar o habilitar controles interactivos del formulario
+  const qtyInput = document.getElementById("mov-cantidad");
+  const qtyMinus = document.getElementById("qty-minus");
+  const qtyPlus = document.getElementById("qty-plus");
+  const precioVentaInput = document.getElementById("mov-precio-venta");
+  const submitBtn = document.getElementById("mov-submit-btn");
+
+  if (qtyInput) qtyInput.disabled = shouldBlock;
+  if (qtyMinus) qtyMinus.disabled = shouldBlock;
+  if (qtyPlus) qtyPlus.disabled = shouldBlock;
+  if (precioVentaInput) precioVentaInput.disabled = shouldBlock;
+
+  // Botones de opción en salida (Tipo de venta, Forma de pago, Comprobante, etc.)
+  document.querySelectorAll("#salida-sale-details .option-btn, #salida-obs-group .option-btn, .quick-qty-chip").forEach(el => {
+    if (el.tagName === "BUTTON") {
+      el.disabled = shouldBlock;
+    }
+  });
+
+  const docDni = document.getElementById("mov-doc-dni");
+  const docRuc = document.getElementById("mov-doc-ruc");
+  if (docDni) docDni.disabled = shouldBlock;
+  if (docRuc) docRuc.disabled = shouldBlock;
+
+  if (submitBtn) {
+    submitBtn.disabled = shouldBlock;
+    if (shouldBlock) {
+      submitBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg> Sin Stock Disponible (Venta Bloqueada)`;
+    } else {
+      if (isSalida) {
+        submitBtn.style.background = "linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%)";
+        submitBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7-7"/></svg> Registrar Salida / Venta`;
+      } else {
+        submitBtn.style.background = "linear-gradient(135deg, #10b981 0%, #059669 100%)";
+        submitBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg> Registrar Entrada de Stock`;
+      }
+    }
+  }
+}
+
+/**
  * Vista previa reactiva del stock resultante (compartida para ENTRADA y SALIDA)
  */
 function updateStockPreview() {
@@ -1480,11 +1564,15 @@ function updateStockPreview() {
 
   if (!selectedArticulo) {
     previewBox.innerHTML = `<span style="color:var(--text-muted);">Selecciona un producto para calcular el stock</span>`;
+    setSalidaFormStockBlocked(false);
+    updateCalculatedPrices();
     return;
   }
 
   if (!selectedSize) {
     previewBox.innerHTML = `<span style="color:var(--text-muted);">Selecciona una talla para calcular el stock</span>`;
+    setSalidaFormStockBlocked(false);
+    updateCalculatedPrices();
     return;
   }
 
@@ -1505,12 +1593,13 @@ function updateStockPreview() {
           Código: <b class="badge-code">${escapeHtml(codigo)}</b>
         </span>
         <span style="font-size:0.85rem; font-weight:800; color:${(isOutOfStock || isExceeded) ? 'var(--danger)' : 'var(--text-main)'}">
-          ${isOutOfStock ? '❌ Venta bloqueada' : (isExceeded ? `⚠️ Venta bloqueada: Cantidad supera stock disponible` : `Stock tras venta: <b>${stockFinal} unid.</b>`)}
+          ${isOutOfStock ? '❌ Venta bloqueada: Stock agotado (0 unid.)' : (isExceeded ? `⚠️ Venta bloqueada: Cantidad supera stock disponible` : `Stock tras venta: <b>${stockFinal} unid.</b>`)}
         </span>
       </div>
       ${isOutOfStock ? `<span class="badge-stock badge-out-stock">🚫 Agotado</span>` : (isExceeded ? `<span class="badge-stock badge-out-stock">⚠️ Excede stock</span>` : '')}
     `;
 
+    setSalidaFormStockBlocked(isOutOfStock);
   } else {
     // Modo ENTRADA
     const stockFinal = stockActual + cant;
@@ -1525,7 +1614,11 @@ function updateStockPreview() {
         </span>
       </div>
     `;
+
+    setSalidaFormStockBlocked(false);
   }
+
+  updateCalculatedPrices();
 }
 
 /**
@@ -1575,6 +1668,7 @@ async function handleMovementSubmit(e) {
   let precioVenta = null;
   let tipoVenta = "";
   let precioSinIgv = null;
+  let precioTotal = null;
   let formaPago = "Efectivo";
   let comprobanteFinal = "NO";
   let tipoComprobanteFinal = "";
@@ -1617,6 +1711,10 @@ async function handleMovementSubmit(e) {
     const sinIgvVal = precioVenta - (precioVenta * 0.18);
     precioSinIgv = parseFloat((Math.round(sinIgvVal * 100) / 100).toFixed(2));
 
+    // Precio Total (Columna I en Sheets)
+    const totalVal = cantidad * precioVenta;
+    precioTotal = parseFloat((Math.round(totalVal * 100) / 100).toFixed(2));
+
     // Forma de Pago (Efectivo, Transferencia, Yape)
     const formaPagoEl = document.getElementById("mov-forma-pago");
     formaPago = (formaPagoEl && formaPagoEl.value.trim()) || AppState.movementForm.formaPago || "Efectivo";
@@ -1640,13 +1738,13 @@ async function handleMovementSubmit(e) {
       if (tipoComprobanteFinal === "Boleta") {
         const dniInput = document.getElementById("mov-doc-dni");
         const dni = dniInput ? dniInput.value.trim() : "";
-        if (!dni || !/^\d{8}$/.test(dni)) {
-          showToast("Para Boleta, ingresa un número de DNI válido (8 dígitos numéricos).", "error");
+        if (dni && !/^\d{8}$/.test(dni)) {
+          showToast("Si ingresas un DNI, debe contener 8 dígitos numéricos.", "error");
           if (dniInput) dniInput.focus();
           return;
         }
         docComprobanteFinal = dni;
-        comprobanteFinal = `Boleta - DNI: ${dni}`;
+        comprobanteFinal = dni ? `Boleta - DNI: ${dni}` : "Boleta";
       } else if (tipoComprobanteFinal === "Factura") {
         const rucInput = document.getElementById("mov-doc-ruc");
         const ruc = rucInput ? rucInput.value.trim() : "";
@@ -1698,6 +1796,7 @@ async function handleMovementSubmit(e) {
     precioVenta: (tipo === "SALIDA" ? precioVenta : null),
     tipoVenta: (tipo === "SALIDA" ? tipoVenta : ""),
     precioSinIgv: (tipo === "SALIDA" ? precioSinIgv : null),
+    precioTotal: (tipo === "SALIDA" ? precioTotal : null),
     formaPago: (tipo === "SALIDA" ? formaPago : ""),
     comprobantePago: (tipo === "SALIDA" ? comprobanteFinal : ""),
     observacion
@@ -1705,7 +1804,7 @@ async function handleMovementSubmit(e) {
 
   const signature = (window.api && window.api.computeOperationSignature)
     ? window.api.computeOperationSignature(movementOpData)
-    : [tipo, codigo, cantidad, precioVenta, tipoVenta, formaPago, comprobanteFinal, observacion].join("::");
+    : [tipo, codigo, cantidad, precioVenta, tipoVenta, precioSinIgv, precioTotal, formaPago, comprobanteFinal, observacion].join("::");
 
   let pendingOp = (window.api && window.api.getPendingOperation) ? window.api.getPendingOperation() : null;
   let requestId = "";
@@ -1752,6 +1851,7 @@ async function handleMovementSubmit(e) {
       payload.precioVenta = precioVenta;
       payload.tipoVenta = tipoVenta;
       payload.precioSinIgv = precioSinIgv;
+      payload.precioTotal = precioTotal;
       payload.formaPago = formaPago;
       payload.comprobantePago = comprobanteFinal;
       payload.tipoComprobante = tipoComprobanteFinal;
@@ -1785,6 +1885,8 @@ async function handleMovementSubmit(e) {
         if (pInput) pInput.value = "";
         const psiInput = document.getElementById("mov-precio-sin-igv");
         if (psiInput) psiInput.value = "";
+        const ptInput = document.getElementById("mov-precio-total");
+        if (ptInput) ptInput.value = "";
 
         // Reset Tipo de Venta a Unitario (primer botón siempre seleccionado por defecto)
         document.querySelectorAll("#mov-tipo-venta-buttons .option-btn").forEach((b, idx) => {
@@ -2008,31 +2110,284 @@ function formatFechaHora(fechaRaw) {
 }
 
 /**
- * Renderizado de Movimientos Recientes
+ * Extrae o complementa el nombre del artículo con la talla correspondiente
+ * Ejemplo: "CAMISA AIR - CHALIS (M)" o "Camisa Oxford Clásica Celeste (S)"
+ */
+function getMovementProductWithTalla(m) {
+  if (!m) return "Producto sin nombre";
+  let baseName = getProductName(m.codigo, m.articulo) || "Producto sin nombre";
+
+  let talla = "";
+  if (m.talla && typeof m.talla === "string" && m.talla.trim()) {
+    talla = m.talla.trim().toUpperCase();
+  } else if (m.codigo && AppState.stock && AppState.stock.length > 0) {
+    const cleanCod = String(m.codigo).trim().toUpperCase();
+    const item = AppState.stock.find(s => String(s.codigo || '').trim().toUpperCase() === cleanCod);
+    if (item && item.talla && String(item.talla).trim()) {
+      talla = String(item.talla).trim().toUpperCase();
+    }
+  }
+
+  // Si no está en stock, deducir la talla del sufijo del código (ej: CAM-001-M -> M)
+  if (!talla && m.codigo) {
+    const cleanCod = String(m.codigo).trim().toUpperCase();
+    const match = cleanCod.match(/-(XXL|XL|XS|XXXL|[SML])$/i);
+    if (match) {
+      talla = match[1].toUpperCase();
+    }
+  }
+
+  if (talla) {
+    // Evitar duplicar si el nombre ya incluye la talla entre paréntesis, ej: (M)
+    const regexTalla = new RegExp(`\\(${talla}\\)`, 'i');
+    if (!regexTalla.test(baseName)) {
+      return `${baseName.trim()} (${talla})`;
+    }
+  }
+  return baseName;
+}
+
+/**
+ * Retorna la lista de movimientos filtrada por Mes y Año
+ */
+function getFilteredRecentMovements() {
+  const movs = AppState.movements || [];
+  const now = new Date();
+  const filter = AppState.movsFilter || {
+    mes: String(now.getMonth()),
+    anio: String(now.getFullYear())
+  };
+
+  const filterMes = (filter.mes === undefined || filter.mes === null || filter.mes === "ALL") ? null : parseInt(filter.mes, 10);
+  const filterAnio = (filter.anio === undefined || filter.anio === null || filter.anio === "ALL") ? null : parseInt(filter.anio, 10);
+
+  return movs.filter(m => {
+    if (!m || !m.fechaHora) return false;
+    const parts = parseMovementDateParts(m.fechaHora);
+    if (!parts) return false;
+
+    if (filterAnio !== null && parseInt(parts.year, 10) !== filterAnio) return false;
+    if (filterMes !== null && parseInt(parts.month, 10) !== filterMes) return false;
+
+    return true;
+  });
+}
+
+/**
+ * Puebla dinámicamente los años disponibles en el selector de Últimos Movimientos
+ */
+function populateMovsYears() {
+  const anioSelect = document.getElementById("movs-filter-anio");
+  if (!anioSelect) return;
+
+  const nowYear = new Date().getFullYear();
+  const yearsSet = new Set([nowYear, 2026, 2025, 2024]);
+
+  (AppState.movements || []).forEach(m => {
+    if (m && m.fechaHora) {
+      const parts = parseMovementDateParts(m.fechaHora);
+      if (parts && !isNaN(parts.year)) {
+        yearsSet.add(parseInt(parts.year, 10));
+      }
+    }
+  });
+
+  const years = Array.from(yearsSet).sort((a, b) => b - a);
+  const currentVal = AppState.movsFilter ? String(AppState.movsFilter.anio) : String(nowYear);
+
+  let html = `<option value="ALL">Todos los años</option>`;
+  years.forEach(y => {
+    html += `<option value="${y}">${y}</option>`;
+  });
+  anioSelect.innerHTML = html;
+  anioSelect.value = currentVal;
+}
+
+/**
+ * Verifica si el filtro de Últimos Movimientos está en su valor por defecto (mes y año actual)
+ */
+function isMovsFilterDefault() {
+  if (!AppState.movsFilter) return true;
+  const now = new Date();
+  return String(AppState.movsFilter.mes) === String(now.getMonth()) &&
+         String(AppState.movsFilter.anio) === String(now.getFullYear());
+}
+
+/**
+ * Actualiza el estado visual del botón de lápiz de Últimos Movimientos
+ */
+function updateMovsPencilButtonState() {
+  const toggleBtn = document.getElementById("movs-filter-toggle-btn");
+  const container = document.getElementById("movs-date-filters");
+  if (!toggleBtn) return;
+
+  const isOpen = container && !container.classList.contains("hidden");
+  const isCustom = !isMovsFilterDefault();
+
+  if (isOpen || isCustom) {
+    toggleBtn.classList.add("active");
+  } else {
+    toggleBtn.classList.remove("active");
+  }
+}
+
+/**
+ * Actualiza el texto de resumen del filtro de Últimos Movimientos
+ */
+function updateMovsFilterSummaryText() {
+  const summaryEl = document.getElementById("movs-filter-summary-text");
+  if (!summaryEl || !AppState.movsFilter) return;
+
+  const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const now = new Date();
+  const currentMes = String(now.getMonth());
+  const currentAnio = String(now.getFullYear());
+
+  const fMes = AppState.movsFilter.mes;
+  const fAnio = AppState.movsFilter.anio;
+
+  if (fMes === currentMes && fAnio === currentAnio) {
+    summaryEl.textContent = `Filtrando: Mes actual (${monthNames[now.getMonth()]} ${now.getFullYear()})`;
+  } else if (fMes === "ALL" && fAnio === "ALL") {
+    summaryEl.textContent = "Mostrando: Todos los movimientos";
+  } else if (fMes === "ALL") {
+    summaryEl.textContent = `Filtrando: Todo el año ${fAnio}`;
+  } else if (fAnio === "ALL") {
+    summaryEl.textContent = `Filtrando: Mes de ${monthNames[parseInt(fMes, 10)]} (todos los años)`;
+  } else {
+    summaryEl.textContent = `Filtrando: ${monthNames[parseInt(fMes, 10)]} ${fAnio}`;
+  }
+}
+
+/**
+ * Inicializa los eventos del panel de filtros de Últimos Movimientos
+ */
+function initMovsDateFilters() {
+  const toggleBtn = document.getElementById("movs-filter-toggle-btn");
+  const container = document.getElementById("movs-date-filters");
+  const mesSelect = document.getElementById("movs-filter-mes");
+  const anioSelect = document.getElementById("movs-filter-anio");
+  const resetBtn = document.getElementById("movs-filter-reset-btn");
+
+  const now = new Date();
+  const currentMes = String(now.getMonth());
+  const currentAnio = String(now.getFullYear());
+
+  if (!AppState.movsFilter) {
+    AppState.movsFilter = { mes: currentMes, anio: currentAnio };
+  }
+
+  populateMovsYears();
+
+  if (mesSelect) mesSelect.value = AppState.movsFilter.mes;
+  if (anioSelect) anioSelect.value = AppState.movsFilter.anio;
+
+  updateMovsFilterSummaryText();
+  updateMovsPencilButtonState();
+
+  if (toggleBtn && !toggleBtn._hasInitListener) {
+    toggleBtn._hasInitListener = true;
+    toggleBtn.addEventListener("click", () => {
+      if (!container) return;
+      container.classList.toggle("hidden");
+      updateMovsPencilButtonState();
+    });
+  }
+
+  if (mesSelect && !mesSelect._hasInitListener) {
+    mesSelect._hasInitListener = true;
+    mesSelect.addEventListener("change", (e) => {
+      AppState.movsFilter.mes = e.target.value;
+      AppState.movsShowAll = false; // Resetear a las primeras 10 transacciones
+      updateMovsFilterSummaryText();
+      updateMovsPencilButtonState();
+      renderRecentMovements();
+    });
+  }
+
+  if (anioSelect && !anioSelect._hasInitListener) {
+    anioSelect._hasInitListener = true;
+    anioSelect.addEventListener("change", (e) => {
+      AppState.movsFilter.anio = e.target.value;
+      AppState.movsShowAll = false; // Resetear a las primeras 10 transacciones
+      updateMovsFilterSummaryText();
+      updateMovsPencilButtonState();
+      renderRecentMovements();
+    });
+  }
+
+  if (resetBtn && !resetBtn._hasInitListener) {
+    resetBtn._hasInitListener = true;
+    resetBtn.addEventListener("click", () => {
+      const n = new Date();
+      AppState.movsFilter.mes = String(n.getMonth());
+      AppState.movsFilter.anio = String(n.getFullYear());
+      AppState.movsShowAll = false;
+
+      if (mesSelect) mesSelect.value = AppState.movsFilter.mes;
+      if (anioSelect) anioSelect.value = AppState.movsFilter.anio;
+
+      updateMovsFilterSummaryText();
+      updateMovsPencilButtonState();
+      renderRecentMovements();
+      showToast("Filtros de movimientos restablecidos al mes actual", "info");
+    });
+  }
+}
+
+/**
+ * Renderizado de Movimientos Recientes con Talla, Filtro Mes/Año y Paginación Visual (Top 10 + Ver todos)
  */
 function renderRecentMovements() {
   const container = document.getElementById("recent-movements-container");
   if (!container) return;
 
-  const movs = AppState.movements || [];
+  // Asegurar años poblados y sincronizados en el selector
+  populateMovsYears();
+  updateMovsFilterSummaryText();
+  updateMovsPencilButtonState();
 
-  if (movs.length === 0) {
+  const filteredMovs = getFilteredRecentMovements();
+
+  if (filteredMovs.length === 0) {
+    const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+    let periodoTexto = "este período";
+    if (AppState.movsFilter) {
+      if (AppState.movsFilter.mes !== "ALL" && AppState.movsFilter.anio !== "ALL") {
+        periodoTexto = `${monthNames[parseInt(AppState.movsFilter.mes, 10)]} de ${AppState.movsFilter.anio}`;
+      } else if (AppState.movsFilter.mes !== "ALL") {
+        periodoTexto = `${monthNames[parseInt(AppState.movsFilter.mes, 10)]}`;
+      } else if (AppState.movsFilter.anio !== "ALL") {
+        periodoTexto = `el año ${AppState.movsFilter.anio}`;
+      }
+    }
+
     container.innerHTML = `
-      <div style="text-align:center; padding: 24px; color: var(--text-muted); font-size: 0.85rem;">
-        No hay movimientos registrados recientemente.
+      <div style="text-align:center; padding: 28px 16px; background: #ffffff; border-radius: var(--radius-md); border: 1px dashed #fbcfe8; color: var(--text-muted); font-size: 0.85rem; margin-top: 8px;">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#be185d" stroke-width="1.8" style="margin-bottom: 8px; opacity: 0.7;">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        <div style="font-weight: 700; color: var(--dark); margin-bottom: 4px;">Sin movimientos en este período</div>
+        <div>No se encontraron registros para ${escapeHtml(periodoTexto)}.</div>
       </div>
     `;
     return;
   }
 
-  container.innerHTML = movs.slice(0, 15).map(m => {
+  const showAll = !!AppState.movsShowAll;
+  const itemsToRender = showAll ? filteredMovs : filteredMovs.slice(0, 10);
+  const totalCount = filteredMovs.length;
+
+  const itemsHtml = itemsToRender.map(m => {
     const isEntrada = m.tipo === "ENTRADA";
     const hasSaleData = !isEntrada && m.precioVenta !== null && m.precioVenta !== undefined && m.precioVenta !== "";
     const saleTag = hasSaleData ? ` • <b>S/ ${Number(m.precioVenta).toFixed(2)}</b> (${escapeHtml(m.tipoVenta || 'Venta')})` : '';
     const pagoTag = (!isEntrada && m.formaPago) ? ` • <span style="color:var(--primary); font-weight:600;">${escapeHtml(m.formaPago)}</span>` : '';
     const compTag = (!isEntrada && m.comprobantePago && m.comprobantePago !== 'NO') ? ` • <span style="font-weight:600;">[${escapeHtml(m.comprobantePago)}]</span>` : '';
     const fechaLegible = formatFechaHora(m.fechaHora);
-    const nombreArticulo = getProductName(m.codigo, m.articulo);
+    const nombreArticuloConTalla = getMovementProductWithTalla(m);
 
     return `
       <div class="movement-item">
@@ -2041,7 +2396,7 @@ function renderRecentMovements() {
             ${isEntrada ? '↓' : '↑'}
           </div>
           <div class="mov-info">
-            <h4>${escapeHtml(nombreArticulo)}</h4>
+            <h4>${escapeHtml(nombreArticuloConTalla)}</h4>
             <p>${escapeHtml(fechaLegible || '')}${saleTag}${pagoTag}${compTag} • <i>${escapeHtml(m.observacion || 'Sin observación')}</i></p>
           </div>
         </div>
@@ -2054,6 +2409,56 @@ function renderRecentMovements() {
       </div>
     `;
   }).join("");
+
+  let paginationHtml = "";
+  if (totalCount > 10) {
+    if (!showAll) {
+      paginationHtml = `
+        <div class="ver-todos-container">
+          <button type="button" id="btn-movs-ver-todos" class="btn-ver-todos">
+            <span>Ver todos (${totalCount} movimientos)</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M6 9l6 6 6-6"/>
+            </svg>
+          </button>
+        </div>
+      `;
+    } else {
+      paginationHtml = `
+        <div class="ver-todos-container">
+          <button type="button" id="btn-movs-ver-menos" class="btn-ver-todos">
+            <span>Ver menos (primeros 10)</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M18 15l-6-6-6 6"/>
+            </svg>
+          </button>
+        </div>
+      `;
+    }
+  }
+
+  container.innerHTML = itemsHtml + paginationHtml;
+
+  // Conectar interactividad de los botones de paginación visual
+  const btnVerTodos = document.getElementById("btn-movs-ver-todos");
+  if (btnVerTodos) {
+    btnVerTodos.addEventListener("click", () => {
+      AppState.movsShowAll = true;
+      renderRecentMovements();
+    });
+  }
+
+  const btnVerMenos = document.getElementById("btn-movs-ver-menos");
+  if (btnVerMenos) {
+    btnVerMenos.addEventListener("click", () => {
+      AppState.movsShowAll = false;
+      renderRecentMovements();
+      const titleEl = document.querySelector("#tab-movimientos .section-title");
+      if (titleEl) {
+        titleEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    });
+  }
 }
 
 /**

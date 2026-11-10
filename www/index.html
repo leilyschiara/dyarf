@@ -523,15 +523,7 @@
                   </div>
                 </div>
 
-                <!-- 2. Tipo de venta (Botones interactivos estilo tallas: Unitario y Por Mayor, primer botón seleccionado) -->
-                <div class="form-group">
-                  <label>Tipo de Venta <span class="required-star">*</span></label>
-                  <div class="option-buttons-grid" id="mov-tipo-venta-buttons">
-                    <button type="button" class="option-btn active" data-value="Unitario">Unitario</button>
-                    <button type="button" class="option-btn" data-value="Por Mayor">Por Mayor</button>
-                  </div>
-                  <input type="hidden" id="mov-tipo-venta" value="Unitario">
-                </div>
+                
 
                 <!-- 3. Precio sin IGV (Solo lectura, calculado en tiempo real: Precio de venta - (Precio de venta * 0.18)) -->
                 <div class="form-group">
@@ -544,7 +536,28 @@
                   </small>
                 </div>
 
-                <!-- 4. Forma de pago (Botones interactivos: Efectivo, Transferencia, Yape) -->
+                <!-- 2. Precio Total (Solo lectura, calculado en tiempo real: Cantidad × Precio de Venta) -->
+                <div class="form-group">
+                  <label for="mov-precio-total">Precio Total (S/) <span class="required-star">*</span></label>
+                  <div class="input-container">
+                    <input type="text" id="mov-precio-total" class="app-input" readonly placeholder="0.00" style="padding-left:14px; background: rgba(0,0,0,0.03); color: var(--text-main); font-weight: 700;">
+                  </div>
+                  <small style="font-size:0.72rem; color:var(--text-muted); margin-top:3px; display:block;">
+                    Cálculo automático: Cantidad × Precio de venta
+                  </small>
+                </div>
+
+                <!-- 4. Tipo de venta (Botones interactivos estilo tallas: Unitario y Por Mayor, primer botón seleccionado) -->
+                <div class="form-group">
+                  <label>Tipo de Venta <span class="required-star">*</span></label>
+                  <div class="option-buttons-grid" id="mov-tipo-venta-buttons">
+                    <button type="button" class="option-btn active" data-value="Unitario">Unitario</button>
+                    <button type="button" class="option-btn" data-value="Por Mayor">Por Mayor</button>
+                  </div>
+                  <input type="hidden" id="mov-tipo-venta" value="Unitario">
+                </div>
+
+                <!-- 5. Forma de pago (Botones interactivos: Efectivo, Transferencia, Yape) -->
                 <div class="form-group">
                   <label>Forma de Pago <span class="required-star">*</span></label>
                   <div class="option-buttons-grid cols-3" id="mov-forma-pago-buttons">
@@ -555,7 +568,7 @@
                   <input type="hidden" id="mov-forma-pago" value="Efectivo">
                 </div>
 
-                <!-- 5. Comprobante de pago (Botones interactivos: SI y NO) -->
+                <!-- 6. Comprobante de pago (Botones interactivos: SI y NO) -->
                 <div class="form-group">
                   <label>Comprobante de Pago <span class="required-star">*</span></label>
                   <div class="option-buttons-grid" id="mov-comprobante-pago-buttons">
@@ -576,13 +589,13 @@
                   </div>
                   <input type="hidden" id="mov-tipo-comprobante" value="Boleta">
 
-                  <!-- Campo condicional para Boleta: DNI -->
+                  <!-- Campo condicional para Boleta: DNI (Opcional) -->
                   <div id="campo-dni-group" class="form-group mt-3" style="margin-bottom:0;">
-                    <label for="mov-doc-dni">DNI <span class="required-star">*</span></label>
+                    <label for="mov-doc-dni">DNI</label>
                     <div class="input-container">
-                      <input type="text" id="mov-doc-dni" class="app-input" inputmode="numeric" maxlength="8" placeholder="Ingresa 8 dígitos numéricos" style="padding-left:14px;">
+                      <input type="text" id="mov-doc-dni" class="app-input" inputmode="numeric" maxlength="8" placeholder="Ingresa 8 dígitos numéricos (opcional)" style="padding-left:14px;">
                     </div>
-                    <small style="font-size:0.7rem; color:var(--text-muted); margin-top:2px; display:block;">Solo números (8 dígitos)</small>
+                    <small style="font-size:0.7rem; color:var(--text-muted); margin-top:2px; display:block;">Opcional • Solo números (8 dígitos)</small>
                   </div>
 
                   <!-- Campo condicional para Factura: RUC -->
@@ -625,10 +638,60 @@
             </form>
           </div>
 
-          <!-- Historial de Movimientos Recientes -->
+          <!-- Historial de Movimientos Recientes con Filtro por Lápiz -->
           <div class="section-title">
             <span>Últimos Movimientos</span>
+            <button type="button" id="movs-filter-toggle-btn" class="stats-pencil-btn" title="Filtrar por Mes y Año" aria-label="Filtrar por Mes y Año">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+            </button>
           </div>
+
+          <!-- Contenedor de Filtros de Fecha para Movimientos (Mes y Año, oculto por defecto) -->
+          <div class="stats-date-filters hidden" id="movs-date-filters" style="margin-bottom: 14px;">
+            <div class="stats-date-filters-grid" style="grid-template-columns: 1fr 1fr;">
+              <div class="stats-filter-field">
+                <label for="movs-filter-mes">Mes</label>
+                <select id="movs-filter-mes" class="stats-select">
+                  <option value="ALL">Todos los meses</option>
+                  <option value="0">Enero</option>
+                  <option value="1">Febrero</option>
+                  <option value="2">Marzo</option>
+                  <option value="3">Abril</option>
+                  <option value="4">Mayo</option>
+                  <option value="5">Junio</option>
+                  <option value="6">Julio</option>
+                  <option value="7">Agosto</option>
+                  <option value="8">Septiembre</option>
+                  <option value="9">Octubre</option>
+                  <option value="10">Noviembre</option>
+                  <option value="11">Diciembre</option>
+                </select>
+              </div>
+
+              <div class="stats-filter-field">
+                <label for="movs-filter-anio">Año</label>
+                <select id="movs-filter-anio" class="stats-select">
+                  <option value="ALL">Todos los años</option>
+                  <!-- Poblado dinámicamente con los años disponibles -->
+                </select>
+              </div>
+            </div>
+
+            <div class="stats-filter-actions">
+              <span id="movs-filter-summary-text" class="stats-filter-summary">Filtrando: Mes actual</span>
+              <button type="button" id="movs-filter-reset-btn" class="stats-filter-reset-btn" title="Restablecer filtros al mes y año actual">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                  <path d="M3 3v5h5"/>
+                </svg>
+                Restablecer
+              </button>
+            </div>
+          </div>
+
           <div id="recent-movements-container">
             <!-- Inyectado dinámicamente -->
           </div>

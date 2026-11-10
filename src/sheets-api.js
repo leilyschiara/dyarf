@@ -299,6 +299,7 @@ class SheetsAPI {
       precioVenta,
       tipoVenta,
       precioSinIgv,
+      precioTotal,
       formaPago,
       comprobantePago,
       tipoComprobante,
@@ -358,6 +359,12 @@ class SheetsAPI {
         pSinIgvNum = payload.precioVenta - (payload.precioVenta * 0.18);
       }
       payload.precioSinIgv = (pSinIgvNum !== null && !isNaN(pSinIgvNum)) ? parseFloat((Math.round(pSinIgvNum * 100) / 100).toFixed(2)) : null;
+
+      let pTotalNum = (precioTotal !== undefined && precioTotal !== null && precioTotal !== "") ? Number(precioTotal) : null;
+      if ((pTotalNum === null || isNaN(pTotalNum)) && payload.precioVenta !== null) {
+        pTotalNum = cantNum * payload.precioVenta;
+      }
+      payload.precioTotal = (pTotalNum !== null && !isNaN(pTotalNum)) ? parseFloat((Math.round(pTotalNum * 100) / 100).toFixed(2)) : null;
 
       // Forma de pago y Comprobante de pago con DNI / RUC
       payload.formaPago = (formaPago || "Efectivo").trim();
@@ -614,6 +621,8 @@ class SheetsAPI {
       String(m.cantidad || "1").trim(),
       String(m.precioVenta !== undefined && m.precioVenta !== null ? m.precioVenta : "").trim(),
       String(m.tipoVenta || "").trim(),
+      String(m.precioSinIgv !== undefined && m.precioSinIgv !== null ? m.precioSinIgv : "").trim(),
+      String(m.precioTotal !== undefined && m.precioTotal !== null ? m.precioTotal : "").trim(),
       String(m.formaPago || "").trim(),
       String(m.comprobantePago || "").trim(),
       String(m.observacion || "").trim()
@@ -685,6 +694,7 @@ class SheetsAPI {
       precioVenta: payload.precioVenta !== undefined ? payload.precioVenta : null,
       tipoVenta: payload.tipoVenta || "",
       precioSinIgv: payload.precioSinIgv !== undefined ? payload.precioSinIgv : null,
+      precioTotal: payload.precioTotal !== undefined ? payload.precioTotal : null,
       formaPago: payload.formaPago || "",
       comprobantePago: payload.comprobantePago || "",
       observacion: payload.observacion,

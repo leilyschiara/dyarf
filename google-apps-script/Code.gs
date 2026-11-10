@@ -934,11 +934,11 @@ function handleAddMovement(payload) {
   // Asegurar existencia de pestaña Movimientos y cabeceras completas
   if (!sheetMov) {
     sheetMov = ss.insertSheet(SHEETS.MOVEMENTS);
-    sheetMov.appendRow(["FECHA", "USUARIO", "TIPO", "CÓDIGO", "CANTIDAD", "PRECIO DE VENTA", "TIPO DE VENTA", "PRECIO SIN IGV", "FORMA DE PAGO", "COMPROBANTE DE PAGO", "OBSERVACIÓN", "REQUEST_ID", "ESTADO_OPERACION"]);
+    sheetMov.appendRow(["FECHA", "USUARIO", "TIPO", "CÓDIGO", "CANTIDAD", "PRECIO DE VENTA", "TIPO DE VENTA", "PRECIO SIN IGV", "PRECIO TOTAL", "FORMA DE PAGO", "COMPROBANTE DE PAGO", "OBSERVACIÓN", "REQUEST_ID", "ESTADO_OPERACION"]);
   }
 
   // 3. COMPROBACIÓN DE IDEMPOTENCIA ANTES DE VALIDAR NUEVAMENTE EL STOCK
-  const movValues = sheetMov.getDataRange().getValues();
+  let movValues = sheetMov.getDataRange().getValues();
   let colFecha = 0;
   let colUser = 1;
   let colTipo = 2;
@@ -947,6 +947,7 @@ function handleAddMovement(payload) {
   let colPrecioVenta = 5;
   let colTipoVenta = 6;
   let colPrecioSinIgv = 7;
+  let colPrecioTotal = -1;
   let colFormaPago = -1;
   let colComprobantePago = -1;
   let colObs = 8;
@@ -954,7 +955,7 @@ function handleAddMovement(payload) {
   let colEstadoOp = -1;
 
   if (movValues.length > 0) {
-    const movHeaders = movValues[0].map(h => String(h).trim().toUpperCase());
+    let movHeaders = movValues[0].map(h => String(h).trim().toUpperCase());
 
     const idxFecha = movHeaders.findIndex(h => h.includes("FECHA"));
     if (idxFecha !== -1) colFecha = idxFecha;
@@ -980,6 +981,29 @@ function handleAddMovement(payload) {
     const idxPrecioSinIgv = movHeaders.findIndex(h => h.includes("PRECIO SIN IGV") || h.includes("PRECIO_SIN_IGV"));
     if (idxPrecioSinIgv !== -1) colPrecioSinIgv = idxPrecioSinIgv;
 
+    let idxPrecioTotal = movHeaders.findIndex(h => h.includes("PRECIO TOTAL") || h.includes("PRECIO_TOTAL") || h === "TOTAL");
+
+    // Si aún no existe la columna PRECIO TOTAL, insertarla inmediatamente después de PRECIO SIN IGV
+    if (idxPrecioTotal === -1) {
+      if (colPrecioSinIgv !== -1 && typeof sheetMov.insertColumnAfter === "function") {
+        try {
+          sheetMov.insertColumnAfter(colPrecioSinIgv + 1);
+          sheetMov.getRange(1, colPrecioSinIgv + 2).setValue("PRECIO TOTAL");
+          // Re-mapear encabezados tras la inserción de columna
+          movValues = sheetMov.getDataRange().getValues();
+          movHeaders = movValues[0].map(h => String(h).trim().toUpperCase());
+          idxPrecioTotal = movHeaders.findIndex(h => h.includes("PRECIO TOTAL") || h.includes("PRECIO_TOTAL") || h === "TOTAL");
+        } catch (colErr) {
+          idxPrecioTotal = movHeaders.length;
+          sheetMov.getRange(1, idxPrecioTotal + 1).setValue("PRECIO TOTAL");
+        }
+      } else {
+        idxPrecioTotal = movHeaders.length;
+        sheetMov.getRange(1, idxPrecioTotal + 1).setValue("PRECIO TOTAL");
+      }
+    }
+    colPrecioTotal = idxPrecioTotal;
+
     const idxFormaPago = movHeaders.findIndex(h => h.includes("FORMA DE PAGO") || h.includes("FORMA_PAGO") || h === "PAGO");
     if (idxFormaPago !== -1) colFormaPago = idxFormaPago;
 
@@ -991,13 +1015,13 @@ function handleAddMovement(payload) {
 
     colReqId = movHeaders.indexOf("REQUEST_ID");
     if (colReqId === -1) {
-      colReqId = movHeaders.length;
+      colReqId = sheetMov.getLastColumn();
       sheetMov.getRange(1, colReqId + 1).setValue("REQUEST_ID");
     }
 
     colEstadoOp = movHeaders.indexOf("ESTADO_OPERACION");
     if (colEstadoOp === -1) {
-      colEstadoOp = Math.max(movHeaders.length, colReqId + 1);
+      colEstadoOp = sheetMov.getLastColumn();
       sheetMov.getRange(1, colEstadoOp + 1).setValue("ESTADO_OPERACION");
     }
   }
@@ -1042,6 +1066,7 @@ function handleAddMovement(payload) {
           precioVenta: (colPrecioVenta !== -1 && existingRowData[colPrecioVenta] !== "") ? Number(existingRowData[colPrecioVenta]) : null,
           tipoVenta: (colTipoVenta !== -1 && existingRowData[colTipoVenta] !== "") ? String(existingRowData[colTipoVenta]) : "",
           precioSinIgv: (colPrecioSinIgv !== -1 && existingRowData[colPrecioSinIgv] !== "") ? Number(existingRowData[colPrecioSinIgv]) : null,
+          precioTotal: (colPrecioTotal !== -1 && existingRowData[colPrecioTotal] !== "") ? Number(existingRowData[colPrecioTotal]) : null,
           formaPago: (colFormaPago !== -1 && existingRowData[colFormaPago] !== "") ? String(existingRowData[colFormaPago]) : "",
           comprobantePago: (colComprobantePago !== -1 && existingRowData[colComprobantePago] !== "") ? String(existingRowData[colComprobantePago]) : "",
           observacion: colObs !== -1 ? String(existingRowData[colObs]) : observacion,
@@ -1126,6 +1151,7 @@ function handleAddMovement(payload) {
   let precioVenta = null;
   let tipoVenta = "";
   let precioSinIgv = null;
+  let precioTotal = null;
   let formaPago = "";
   let comprobantePago = "";
 
@@ -1135,6 +1161,13 @@ function handleAddMovement(payload) {
       precioVenta = Math.round(rawP * 100) / 100;
       const sinIgvCalc = precioVenta - (precioVenta * 0.18);
       precioSinIgv = parseFloat((Math.round(sinIgvCalc * 100) / 100).toFixed(2));
+
+      // Cálculo de Precio Total: Cantidad × Precio de Venta
+      if (payload.precioTotal !== undefined && payload.precioTotal !== null && payload.precioTotal !== "" && !isNaN(Number(payload.precioTotal))) {
+        precioTotal = Math.round(Number(payload.precioTotal) * 100) / 100;
+      } else {
+        precioTotal = Math.round((cantidad * precioVenta) * 100) / 100;
+      }
     }
     tipoVenta = String(payload.tipoVenta || "").trim();
     formaPago = String(payload.formaPago || "").trim();
@@ -1161,14 +1194,15 @@ function handleAddMovement(payload) {
   // Si no existía fila previa, insertar fila con estado inicial 'PENDING'
   if (targetMovementRow === -1) {
     const totalCols = Math.max(
-      movValues.length > 0 ? movValues[0].length : 13,
+      movValues.length > 0 ? movValues[0].length : 14,
       colEstadoOp + 1,
       colReqId + 1,
       colObs + 1,
       colComprobantePago + 1,
       colFormaPago + 1,
+      colPrecioTotal + 1,
       colPrecioSinIgv + 1,
-      13
+      14
     );
     const newRow = new Array(totalCols).fill("");
 
@@ -1186,6 +1220,9 @@ function handleAddMovement(payload) {
     }
     if (colPrecioSinIgv !== -1) {
       newRow[colPrecioSinIgv] = (tipo === "SALIDA" && precioSinIgv !== null) ? precioSinIgv : "";
+    }
+    if (colPrecioTotal !== -1) {
+      newRow[colPrecioTotal] = (tipo === "SALIDA" && precioTotal !== null) ? precioTotal : "";
     }
     if (colFormaPago !== -1) {
       newRow[colFormaPago] = (tipo === "SALIDA" && formaPago) ? formaPago : "";
@@ -1262,6 +1299,7 @@ function handleAddMovement(payload) {
       precioVenta: precioVenta,
       tipoVenta: tipoVenta,
       precioSinIgv: precioSinIgv,
+      precioTotal: precioTotal,
       formaPago: formaPago,
       comprobantePago: comprobantePago,
       observacion: observacion,
@@ -1371,6 +1409,7 @@ function getRecentMovements(limit) {
   const colPrecioVenta = headers.findIndex(h => h.includes("PRECIO DE VENTA") || h.includes("PRECIO_VENTA"));
   const colTipoVenta = headers.findIndex(h => h.includes("TIPO DE VENTA") || h.includes("TIPO_VENTA"));
   const colPrecioSinIgv = headers.findIndex(h => h.includes("PRECIO SIN IGV") || h.includes("PRECIO_SIN_IGV"));
+  const colPrecioTotal = headers.findIndex(h => h.includes("PRECIO TOTAL") || h.includes("PRECIO_TOTAL") || h === "TOTAL");
   const colFormaPago = headers.findIndex(h => h.includes("FORMA DE PAGO") || h.includes("FORMA_PAGO") || h === "PAGO");
   const colComprobantePago = headers.findIndex(h => h.includes("COMPROBANTE DE PAGO") || h.includes("COMPROBANTE_PAGO") || h.includes("COMPROBANTE"));
   const colObs = headers.findIndex(h => h.includes("OBSERVACIÓN") || h.includes("OBSERVACION"));
@@ -1415,6 +1454,9 @@ function getRecentMovements(limit) {
     const precioSinIgvNum = (colPrecioSinIgv !== -1 && row[colPrecioSinIgv] !== undefined)
       ? parseSheetNumberGAS(row[colPrecioSinIgv])
       : null;
+    const precioTotalNum = (colPrecioTotal !== -1 && row[colPrecioTotal] !== undefined)
+      ? parseSheetNumberGAS(row[colPrecioTotal])
+      : null;
     const cantNum = (colCant !== -1 && row[colCant] !== undefined)
       ? (parseSheetNumberGAS(row[colCant]) || 1)
       : 1;
@@ -1430,6 +1472,7 @@ function getRecentMovements(limit) {
       precioVenta: precioVentaNum,
       tipoVenta: (colTipoVenta !== -1 && row[colTipoVenta] !== "") ? String(row[colTipoVenta]).trim() : "",
       precioSinIgv: precioSinIgvNum,
+      precioTotal: precioTotalNum,
       formaPago: (colFormaPago !== -1 && row[colFormaPago] !== "") ? String(row[colFormaPago]).trim() : "",
       comprobantePago: (colComprobantePago !== -1 && row[colComprobantePago] !== "") ? String(row[colComprobantePago]).trim() : "",
       observacion: colObs !== -1 ? String(row[colObs] || "").trim() : "",
@@ -1504,19 +1547,19 @@ function setupSheet() {
     sheetMov = ss.insertSheet(SHEETS.MOVEMENTS);
   }
   sheetMov.clear();
-  sheetMov.appendRow(["FECHA", "USUARIO", "TIPO", "CÓDIGO", "CANTIDAD", "PRECIO DE VENTA", "TIPO DE VENTA", "PRECIO SIN IGV", "FORMA DE PAGO", "COMPROBANTE DE PAGO", "OBSERVACIÓN", "REQUEST_ID", "ESTADO_OPERACION"]);
-  formatHeader(sheetMov, 13);
+  sheetMov.appendRow(["FECHA", "USUARIO", "TIPO", "CÓDIGO", "CANTIDAD", "PRECIO DE VENTA", "TIPO DE VENTA", "PRECIO SIN IGV", "PRECIO TOTAL", "FORMA DE PAGO", "COMPROBANTE DE PAGO", "OBSERVACIÓN", "REQUEST_ID", "ESTADO_OPERACION"]);
+  formatHeader(sheetMov, 14);
   
   const sampleMovs = [
-    ["2026-11-08 09:30:00", "admin", "ENTRADA", "CAM-001-M", 20, "", "", "", "", "", "Llegada lote confección taller", "REQ-INIT-001", "COMPLETED"],
-    ["2026-11-08 10:15:20", "mayte", "SALIDA", "CAM-002-M", 3, 95.00, "Unitario", 77.90, "Efectivo", "NO", "Venta en tienda física cliente frecuente", "REQ-INIT-002", "COMPLETED"],
-    ["2026-11-08 11:45:00", "mati", "SALIDA", "CAM-003-M", 2, 110.00, "Unitario", 90.20, "Transferencia", "NO", "Pedido por WhatsApp entrega mensajería", "REQ-INIT-003", "COMPLETED"],
-    ["2026-11-08 14:20:10", "admin", "ENTRADA", "CAM-004-L", 15, "", "", "", "", "", "Reposición de bodega central", "REQ-INIT-004", "COMPLETED"],
-    ["2026-11-08 16:05:40", "mayte", "SALIDA", "CAM-001-XL", 2, 85.00, "Unitario", 69.70, "Yape", "Boleta - DNI: 72849102", "Venta en tienda", "REQ-INIT-005", "COMPLETED"]
+    ["2026-11-08 09:30:00", "admin", "ENTRADA", "CAM-001-M", 20, "", "", "", "", "", "", "Llegada lote confección taller", "REQ-INIT-001", "COMPLETED"],
+    ["2026-11-08 10:15:20", "mayte", "SALIDA", "CAM-002-M", 3, 95.00, "Unitario", 77.90, 285.00, "Efectivo", "NO", "Venta en tienda física cliente frecuente", "REQ-INIT-002", "COMPLETED"],
+    ["2026-11-08 11:45:00", "mati", "SALIDA", "CAM-003-M", 2, 110.00, "Unitario", 90.20, 220.00, "Transferencia", "NO", "Pedido por WhatsApp entrega mensajería", "REQ-INIT-003", "COMPLETED"],
+    ["2026-11-08 14:20:10", "admin", "ENTRADA", "CAM-004-L", 15, "", "", "", "", "", "", "Reposición de bodega central", "REQ-INIT-004", "COMPLETED"],
+    ["2026-11-08 16:05:40", "mayte", "SALIDA", "CAM-001-XL", 2, 85.00, "Unitario", 69.70, 170.00, "Yape", "Boleta - DNI: 72849102", "Venta en tienda", "REQ-INIT-005", "COMPLETED"]
   ];
 
   sampleMovs.forEach(mov => sheetMov.appendRow(mov));
-  formatHeader(sheetMov, 13);
+  formatHeader(sheetMov, 14);
 
   SpreadsheetApp.flush();
 

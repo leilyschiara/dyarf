@@ -2256,3 +2256,99 @@ body {
 .mt-4 { margin-top: 16px; }
 .mb-2 { margin-bottom: 8px; }
 .mb-4 { margin-bottom: 16px; }
+
+/* ==========================================================================
+   Bloqueo visual en tonos gris/plomo para SALIDAS cuando el stock disponible es 0
+   ========================================================================== */
+.form-out-of-stock-blocked .quantity-stepper .stepper-btn,
+.form-out-of-stock-blocked .quantity-stepper .quantity-input,
+.form-out-of-stock-blocked .quick-qty-chip,
+.form-out-of-stock-blocked #salida-sale-details .app-input,
+.form-out-of-stock-blocked #salida-sale-details .option-btn,
+.form-out-of-stock-blocked #salida-obs-group .option-btn {
+  background: #f1f5f9 !important;
+  color: #94a3b8 !important;
+  border-color: #cbd5e1 !important;
+  cursor: not-allowed !important;
+  box-shadow: none !important;
+  transform: none !important;
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
+.form-out-of-stock-blocked #salida-sale-details .option-btn.active,
+.form-out-of-stock-blocked #salida-obs-group .option-btn.active {
+  background: #e2e8f0 !important;
+  color: #64748b !important;
+  border-color: #94a3b8 !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.form-out-of-stock-blocked .quick-qty-chip {
+  opacity: 0.5 !important;
+}
+
+.form-out-of-stock-blocked #mov-submit-btn {
+  background: linear-gradient(135deg, #94a3b8 0%, #64748b 100%) !important;
+  color: #f8fafc !important;
+  border: 1px solid #94a3b8 !important;
+  cursor: not-allowed !important;
+  box-shadow: none !important;
+  transform: none !important;
+  pointer-events: none !important;
+}
+
+.form-out-of-stock-blocked .form-group:not(:has(#mov-producto-select)):not(:has(#mov-size-buttons)) label,
+.form-out-of-stock-blocked #salida-sale-details label,
+.form-out-of-stock-blocked #salida-obs-group label,
+.form-out-of-stock-blocked label[for="mov-cantidad"] {
+  color: #94a3b8 !important;
+}
+
+.form-out-of-stock-blocked small {
+  color: #94a3b8 !important;
+}
+
+/* ==========================================================================
+   Paginación visual y botón "Ver todos" para Últimos Movimientos
+   ========================================================================== */
+.ver-todos-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 14px;
+  margin-bottom: 8px;
+  animation: fadeIn 0.3s ease;
+}
+
+.btn-ver-todos {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 18px;
+  background: #ffffff;
+  color: var(--primary);
+  border: 1.5px solid #fbcfe8;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(190, 24, 93, 0.08);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  text-decoration: none;
+  outline: none;
+}
+
+.btn-ver-todos:hover {
+  background: #fdf2f8;
+  border-color: #f472b6;
+  color: #831843;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(190, 24, 93, 0.15);
+}
+
+.btn-ver-todos:active {
+  transform: translateY(0);
+}
