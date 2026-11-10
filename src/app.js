@@ -93,6 +93,10 @@ function bindGlobalEvents() {
   if (configBtnLogin) {
     configBtnLogin.addEventListener("click", () => openSettingsModal());
   }
+  const configLinkLogin = document.getElementById("config-link-login");
+  if (configLinkLogin) {
+    configLinkLogin.addEventListener("click", () => openSettingsModal());
+  }
 
   // Tabs de navegación inferior
   document.querySelectorAll(".nav-item").forEach(btn => {
@@ -364,7 +368,9 @@ function bindGlobalEvents() {
  */
 function isAdmin() {
   const user = AppState.user || (window.api && window.api.getCurrentUser());
-  if (!user || !user.rol) return false;
+  if (!user) return false;
+  if (user.isDemoAdmin) return true;
+  if (!user.rol) return false;
   const role = String(user.rol).trim().toLowerCase();
   return role === "administrador" || role === "admin";
 }
@@ -376,6 +382,7 @@ function applyRolePermissions() {
   const adminSection = document.getElementById("admin-connection-section");
   const modal = document.getElementById("settings-modal");
   const configBtnLogin = document.getElementById("config-btn-login");
+  const configLinkLogin = document.getElementById("config-link-login");
   const isUserAdmin = isAdmin();
 
   // Control de la sección de conexión en Ajustes
@@ -387,13 +394,28 @@ function applyRolePermissions() {
     }
   }
 
-  // Ocultar botón de login si existiera
+  // En la pantalla de login, los accesos para configurar URL deben estar visibles
+  const loginScreen = document.getElementById("login-screen");
+  const isLoginVisible = loginScreen && !loginScreen.classList.contains("hidden");
+
   if (configBtnLogin) {
-    configBtnLogin.classList.add("hidden");
+    if (isLoginVisible) {
+      configBtnLogin.classList.remove("hidden");
+    } else {
+      configBtnLogin.classList.add("hidden");
+    }
   }
 
-  // Si no es admin y el modal estaba abierto, forzar su cierre
-  if (!isUserAdmin && modal) {
+  if (configLinkLogin) {
+    if (isLoginVisible) {
+      configLinkLogin.classList.remove("hidden");
+    } else {
+      configLinkLogin.classList.add("hidden");
+    }
+  }
+
+  // Si no es admin y está en la app principal y el modal estaba abierto, forzar su cierre
+  if (AppState.user && !isUserAdmin && modal) {
     modal.classList.add("hidden");
   }
 }
@@ -486,6 +508,7 @@ let _isCheckingSession = false;
  */
 async function checkSessionOnNavigation() {
   if (!AppState.user || _isCheckingSession) return;
+  if (AppState.user.isDemoAdmin || AppState.user.usuario === "demo") return;
   if (!window.api || !window.api.apiUrl) return;
 
   _isCheckingSession = true;
@@ -591,9 +614,17 @@ async function handleLoginSubmit(e) {
 function showLoginAlert(msg, type = "error") {
   const alertEl = document.getElementById("login-alert");
   if (alertEl) {
-    alertEl.textContent = msg;
+    alertEl.innerHTML = msg;
     alertEl.className = `alert-box alert-${type}`;
     alertEl.classList.remove("hidden");
+
+    const trigger = document.getElementById("alert-config-trigger");
+    if (trigger) {
+      trigger.addEventListener("click", (e) => {
+        e.preventDefault();
+        openSettingsModal();
+      });
+    }
   }
 }
 
@@ -1928,13 +1959,22 @@ function renderSettingsView() {
 }
 
 function openSettingsModal() {
-  if (!isAdmin()) {
-    console.warn("Acceso denegado al modal: rol no autorizado.");
+  const currentUser = AppState.user || (window.api && window.api.getCurrentUser());
+  if (currentUser && !isAdmin()) {
+    showToast("Solo el Administrador puede modificar la configuración de Google Sheets.", "error");
     return;
   }
   const modal = document.getElementById("settings-modal");
   if (modal) {
-    renderSettingsView();
+    const modalUrl = document.getElementById("modal-api-url");
+    const settingsUrl = document.getElementById("settings-api-url");
+    const currentUrl = (window.api && window.api.getApiUrl()) || "";
+    if (modalUrl) {
+      modalUrl.value = currentUrl;
+    }
+    if (settingsUrl) {
+      settingsUrl.value = currentUrl;
+    }
     modal.classList.remove("hidden");
   }
 }
@@ -1945,56 +1985,94 @@ function closeSettingsModal() {
 }
 
 async function handleTestApiConnection() {
-  if (!isAdmin()) {
+  const currentUser = AppState.user || (window.api && window.api.getCurrentUser());
+  if (currentUser && !isAdmin()) {
     showToast("Acceso denegado: Solo el Administrador puede probar la conexión.", "error");
     return;
   }
 
-  const urlInput = document.getElementById("settings-api-url");
+  const modalInput = document.getElementById("modal-api-url");
+  const settingsInput = document.getElementById("settings-api-url");
   const testBtn = document.getElementById("test-api-btn");
-  const testUrl = (urlInput ? urlInput.value : "").trim();
+  const modalTestBtn = document.getElementById("modal-test-btn");
+
+  let testUrl = "";
+  if (modalInput && modalInput.value.trim()) {
+    testUrl = modalInput.value.trim();
+  } else if (settingsInput && settingsInput.value.trim()) {
+    testUrl = settingsInput.value.trim();
+  }
 
   if (!testUrl) {
     showToast("Por favor ingresa la URL de Google Apps Script", "error");
     return;
   }
 
-  testBtn.disabled = true;
-  testBtn.innerHTML = `<span class="spinner spinner-dark"></span> Conectando...`;
+  if (testBtn) {
+    testBtn.disabled = true;
+    testBtn.innerHTML = `<span class="spinner spinner-dark"></span> Conectando...`;
+  }
+  if (modalTestBtn) {
+    modalTestBtn.disabled = true;
+    modalTestBtn.innerHTML = `<span class="spinner spinner-dark"></span> Conectando...`;
+  }
 
   try {
-    window.api.setApiUrl(testUrl);
-    const pingRes = await window.api.ping();
-
-    showToast(`✅ Conexión exitosa: ${pingRes.message}`, "success");
-    renderSettingsView();
+    const pingUrl = `${testUrl}${testUrl.includes('?') ? '&' : '?'}action=ping&_t=${Date.now()}`;
+    const resp = await fetch(pingUrl, { method: "GET", mode: "cors" });
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+    }
+    const data = await resp.json();
+    showToast(`✅ Conexión exitosa con Google Sheets: ${data.message || 'OK'}`, "success");
   } catch (err) {
     showToast(`❌ Error al conectar: ${err.message}`, "error");
   } finally {
-    testBtn.disabled = false;
-    testBtn.innerHTML = "Probar Conexión";
+    if (testBtn) {
+      testBtn.disabled = false;
+      testBtn.innerHTML = "Probar Conexión";
+    }
+    if (modalTestBtn) {
+      modalTestBtn.disabled = false;
+      modalTestBtn.innerHTML = "Probar Conexión";
+    }
   }
 }
 
 function handleSaveApiSettings() {
-  if (!isAdmin()) {
+  const currentUser = AppState.user || (window.api && window.api.getCurrentUser());
+  if (currentUser && !isAdmin()) {
     showToast("Acceso denegado: Solo el Administrador puede modificar la configuración.", "error");
     return;
   }
 
-  const urlInput = document.getElementById("settings-api-url");
+  const modalInput = document.getElementById("modal-api-url");
+  const settingsInput = document.getElementById("settings-api-url");
   const demoToggle = document.getElementById("settings-demo-toggle");
 
-  const newUrl = (urlInput ? urlInput.value : "").trim();
+  let newUrl = "";
+  if (modalInput && modalInput.value.trim()) {
+    newUrl = modalInput.value.trim();
+  } else if (settingsInput && settingsInput.value.trim()) {
+    newUrl = settingsInput.value.trim();
+  }
+
   const isDemo = demoToggle ? demoToggle.checked : false;
 
   try {
     window.api.setApiUrl(newUrl);
+    if (settingsInput) settingsInput.value = newUrl;
+    if (modalInput) modalInput.value = newUrl;
     window.api.setDemoMode(isDemo);
 
-    showToast("Configuración guardada correctamente", "success");
+    showToast("Configuración guardada correctamente.", "success");
     closeSettingsModal();
-    loadAppData();
+    if (AppState.user) {
+      loadAppData();
+    } else {
+      hideLoginAlert();
+      showToast("URL configurada. Ya puedes iniciar sesión.", "success");
+    }
   } catch (err) {
     showToast(`Error: ${err.message}`, "error");
   }

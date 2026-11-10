@@ -34,13 +34,17 @@ class SheetsAPI {
 
   isCurrentUserAdmin() {
     const user = this.getCurrentUser();
-    if (!user || !user.rol) return false;
+    if (!user) return false;
+    if (user.isDemoAdmin) return true;
+    if (!user.rol) return false;
     const role = String(user.rol).trim().toLowerCase();
     return role === "administrador" || role === "admin";
   }
 
   setApiUrl(url) {
-    if (!this.isCurrentUserAdmin()) {
+    const user = this.getCurrentUser();
+    // Permitir configurar si no hay usuario en sesión (configuración inicial en GitHub/móvil) o si es admin
+    if (user && !this.isCurrentUserAdmin()) {
       console.warn("Acceso denegado: solo el usuario con rol Administrador puede modificar la URL de la API.");
       throw new Error("Acceso denegado: Solo el Administrador puede modificar la URL de Google Apps Script.");
     }
@@ -57,15 +61,17 @@ class SheetsAPI {
   }
 
   getApiUrl() {
-    // Solo expone la URL si el usuario autenticado tiene rol Administrador
-    if (this.isCurrentUserAdmin()) {
+    const user = this.getCurrentUser();
+    // Exponer la URL si es admin o si está en la pantalla inicial de configuración
+    if (!user || this.isCurrentUserAdmin()) {
       return this.apiUrl;
     }
     return "";
   }
 
   setDemoMode(enabled) {
-    if (!this.isCurrentUserAdmin()) {
+    const user = this.getCurrentUser();
+    if (user && !this.isCurrentUserAdmin()) {
       console.warn("Acceso denegado: solo el usuario con rol Administrador puede alternar el modo demo.");
       throw new Error("Acceso denegado: Solo el Administrador puede modificar esta opción.");
     }
@@ -110,11 +116,31 @@ class SheetsAPI {
       };
     }
 
+    // Acceso especial demo de rescate y configuración inicial
+    if (cleanUser.toLowerCase() === "demo" && cleanPass === "1234@demo.com") {
+      const demoUser = {
+        id: "USR-DEMO",
+        usuario: "demo",
+        rol: "Administrador",
+        estado: 1,
+        isDemoAdmin: true,
+        password: cleanPass,
+        loginTimestamp: Date.now()
+      };
+      this.setCurrentUser(demoUser);
+      return {
+        success: true,
+        user: demoUser,
+        isDemo: true,
+        message: "¡Bienvenido! Has ingresado en Modo Demo con permisos de Administrador para configurar la app."
+      };
+    }
+
     if (!this.apiUrl) {
       return {
         success: false,
         code: "NO_API_URL",
-        message: "Debes configurar la URL de tu Google Apps Script para iniciar sesión. Presiona el icono de configuración (engranaje) e ingresa la URL de tu Web App."
+        message: "No hay URL de Google Apps Script configurada.<br>Ingresa con usuario <b>demo</b> y contraseña <b>1234@demo.com</b> para entrar a Ajustes, o <button type='button' id='alert-config-trigger' style='background:none; border:none; color:var(--primary); font-weight:bold; text-decoration:underline; cursor:pointer; padding:0; font-size:inherit;'>pulsa aquí para configurar la URL</button>."
       };
     }
 
@@ -451,7 +477,7 @@ class SheetsAPI {
       return { success: false, sesionValida: false, message: "No hay sesión activa." };
     }
 
-    if (!this.apiUrl || this.isDemoMode) {
+    if (creds.usuario.toLowerCase() === "demo" || creds.isDemoAdmin || !this.apiUrl || this.isDemoMode) {
       return { success: true, sesionValida: true, isDemo: true };
     }
 
@@ -491,6 +517,7 @@ class SheetsAPI {
         usuario: user.usuario,
         rol: user.rol || "Usuario",
         estado: user.estado || 1,
+        isDemoAdmin: !!user.isDemoAdmin,
         password: user.password || "",
         loginTimestamp: user.loginTimestamp || Date.now()
       };
