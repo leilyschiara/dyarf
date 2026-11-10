@@ -1295,6 +1295,12 @@ window.quickMoveAction = function(codigo) {
   const item = AppState.stock.find(s => s.codigo === codigo);
 
   if (item) {
+    const disp = Number(item.stockDisponible) || 0;
+    // Si la talla o producto no tiene stock (0), enviar obligatoriamente a ENTRADA
+    if (disp <= 0) {
+      setMovementType("ENTRADA");
+    }
+
     const select = document.getElementById("mov-producto-select");
     if (select) {
       select.value = item.articulo;
@@ -1478,7 +1484,7 @@ function updateStockPreview() {
     previewBox.innerHTML = `
       <div>
         <span style="display:block; font-size:0.75rem; color:var(--text-muted);">
-          Código: <b class="badge-code">${escapeHtml(codigo)}</b> | Stock actual: <b>${stockActual} unid.</b>
+          Código: <b class="badge-code">${escapeHtml(codigo)}</b>
         </span>
         <span style="font-size:0.85rem; font-weight:800; color:${(isOutOfStock || isExceeded) ? 'var(--danger)' : 'var(--text-main)'}">
           ${isOutOfStock ? '❌ Venta bloqueada' : (isExceeded ? `⚠️ Venta bloqueada: Cantidad supera stock disponible` : `Stock tras venta: <b>${stockFinal} unid.</b>`)}
@@ -1494,7 +1500,7 @@ function updateStockPreview() {
     previewBox.innerHTML = `
       <div>
         <span style="display:block; font-size:0.75rem; color:var(--text-muted);">
-          Código: <b class="badge-code">${escapeHtml(codigo)}</b> | Stock actual: <b>${stockActual} unid.</b>
+          Código: <b class="badge-code">${escapeHtml(codigo)}</b>
         </span>
         <span style="font-size:0.85rem; font-weight:800; color:var(--success)">
           Stock tras entrada: <b>${stockFinal} unid.</b> (+${cant} unid.)

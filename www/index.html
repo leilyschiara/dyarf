@@ -8,6 +8,7 @@
   <!-- Configuración Móvil y PWA -->
   <meta name="description" content="Sistema móvil de control de stock y registro de ventas para D'Camisas">
   <meta name="theme-color" content="#be185d">
+  <meta http-equiv="Permissions-Policy" content="geolocation=(), bluetooth=(), camera=(), microphone=()">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="D'Camisas">
@@ -51,7 +52,7 @@
       <div class="login-card">
         
         <!-- Mensajes de alerta dinámica (Error / Bloqueado / Datos incorrectos) -->
-        <div id="login-alert" class="alert-box alert-error hidden"></div>
+        <div id="login-alert" class="alert-box alert-error hidden" style="flex-direction: column;"></div>
 
         <form id="login-form">
           <div class="form-group">
