@@ -49,6 +49,11 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+html {
+  height: 100%;
+  height: 100dvh;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background-color: #09090b; /* Fondo exterior oscuro para centrar pantalla móvil en desktop */
@@ -56,7 +61,8 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
-  height: 100vh;
+  height: 100%;
+  height: 100dvh;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -67,6 +73,7 @@ body {
   width: 100%;
   max-width: 440px;
   height: 100%;
+  height: 100dvh;
   max-height: 920px;
   background-color: var(--bg-app);
   display: flex;
@@ -74,6 +81,23 @@ body {
   position: relative;
   overflow: hidden;
   box-shadow: 0 25px 50px -12px rgba(0,0,0,0.35);
+}
+
+/* En teléfonos móviles se alinea arriba (flex-start) para que el header nunca se desplace fuera de pantalla */
+@media (max-width: 479px) {
+  body {
+    align-items: flex-start;
+    background-color: var(--bg-app);
+  }
+
+  #app-viewport {
+    height: 100% !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    border-radius: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
 }
 
 @media (min-width: 480px) {
@@ -92,9 +116,11 @@ body {
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--border);
-  position: sticky;
+  position: relative;
   top: 0;
   z-index: 40;
+  flex-shrink: 0;
+  width: 100%;
 }
 
 .brand-badge {
@@ -181,7 +207,8 @@ body {
 
 /* Área de Contenido con Scroll Suave */
 .main-content {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 16px;
