@@ -28,26 +28,34 @@ Esta aplicación ha sido desarrollada bajo una arquitectura móvil moderna (PWA 
 
 ### Pasos:
 1. Abre una terminal en la carpeta del proyecto `app-camisas`.
-2. Instala las dependencias de Capacitor ejecutando:
+2. Ejecuta la minificación del código JavaScript para proteger la lógica y URLs en producción/APK:
+   ```bash
+   npm run build
+   ```
+   *(o `node scripts/build-minify.js`)*
+3. Instala las dependencias de Capacitor ejecutando:
    ```bash
    npm install
    ```
-3. Agrega la plataforma de Android:
+4. Agrega la plataforma de Android:
    ```bash
    npx cap add android
    ```
-4. Sincroniza los archivos web con la carpeta nativa de Android:
+5. Sincroniza los archivos web minificados con la carpeta nativa de Android:
    ```bash
    npx cap sync android
    ```
-5. Abre el proyecto en Android Studio:
+6. Abre el proyecto en Android Studio:
    ```bash
    npx cap open android
    ```
-6. En Android Studio:
+7. En Android Studio:
    - Espera que Gradle termine de sincronizar.
    - Ve al menú superior: **Build** > **Build Bundle(s) / APK(s)** > **Build APK(s)**.
    - Al finalizar, Android Studio mostrará una notificación: *"Build APK(s): APK(s) generated successfully"*. Haz clic en **locate** para obtener tu archivo `app-debug.apk`.
+   - **Ruta exacta del instalador APK:**
+     - Para depuración / pruebas: `app-camisas/android/app/build/outputs/apk/debug/app-debug.apk`
+     - Para versión firmada / producción: `app-camisas/android/app/build/outputs/apk/release/app-release.apk`
    - Si deseas un APK de producción firmado, ve a: **Build** > **Generate Signed Bundle / APK** > **APK** y sigue el asistente.
 
 ---

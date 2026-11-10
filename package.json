@@ -5,6 +5,9 @@
   "main": "index.html",
   "scripts": {
     "start": "npx serve . -p 3000",
+    "build": "node scripts/build-minify.js",
+    "bundle": "node scripts/bundle-portable.js",
+    "test": "node scratch/test-suite.js",
     "cap:add": "npx cap add android",
     "cap:sync": "npx cap sync",
     "cap:open": "npx cap open android",

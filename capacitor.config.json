@@ -1,8 +1,7 @@
 {
   "appId": "com.dcamisas.app",
   "appName": "D'Camisas",
-  "webDir": ".",
-  "bundledWebRuntime": false,
+  "webDir": "www",
   "server": {
     "androidScheme": "https",
     "cleartext": true

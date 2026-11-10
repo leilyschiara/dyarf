@@ -1,13 +1,13 @@
-const CACHE_NAME = "dcamisas-cache-v4";
+const CACHE_NAME = "dcamisas-cache-v5.8";
 const ASSETS_TO_CACHE = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./src/styles.css",
-  "./src/logo-data.js",
-  "./src/data-demo.js",
-  "./src/sheets-api.js",
-  "./src/app.js",
+  "./src/logo-data.min.js",
+  "./src/data-demo.min.js",
+  "./src/sheets-api.min.js",
+  "./src/app.min.js",
   "./public/logo.jpg",
   "./public/icon-192.png",
   "./public/icon-512.png"

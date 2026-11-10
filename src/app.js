@@ -8,6 +8,8 @@ const AppState = {
   activeTab: "dashboard",
   stock: [],
   movements: [],
+  statsPeriod: "HOY",
+  lastSyncTime: 0,
   filterSize: "ALL",
   filterAvailability: "ALL",
   searchQuery: "",
@@ -22,9 +24,13 @@ const AppState = {
     precioVenta: "",
     tipoVenta: "Unitario",
     precioSinIgv: "",
+    formaPago: "Efectivo",
+    comprobantePago: "NO",
+    tipoComprobante: "Boleta",
+    documentoComprobante: "",
     observacion: "Venta en tienda",
     observacionSalida: "Venta en tienda",
-    observacionEntrada: "Reposición de taller"
+    observacionEntrada: "Ingreso de mercadería"
   }
 };
 
@@ -253,6 +259,68 @@ function bindGlobalEvents() {
     });
   });
 
+  // Botones de Forma de Pago (Efectivo, Transferencia, Yape - Efectivo por defecto)
+  document.querySelectorAll("#mov-forma-pago-buttons .option-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#mov-forma-pago-buttons .option-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const hidden = document.getElementById("mov-forma-pago");
+      if (hidden) hidden.value = btn.dataset.value;
+      AppState.movementForm.formaPago = btn.dataset.value;
+    });
+  });
+
+  // Botones de Comprobante de Pago (SI y NO - NO por defecto)
+  document.querySelectorAll("#mov-comprobante-pago-buttons .option-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#mov-comprobante-pago-buttons .option-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const val = btn.dataset.value;
+      const hidden = document.getElementById("mov-comprobante-pago");
+      if (hidden) hidden.value = val;
+      AppState.movementForm.comprobantePago = val;
+
+      const compGroup = document.getElementById("comprobante-detalles-group");
+      if (compGroup) {
+        if (val === "SI") {
+          compGroup.classList.remove("hidden");
+          updateComprobanteCampos();
+        } else {
+          compGroup.classList.add("hidden");
+        }
+      }
+    });
+  });
+
+  // Botones de Tipo de Comprobante (Boleta o Factura - Boleta por defecto)
+  document.querySelectorAll("#mov-tipo-comprobante-buttons .option-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#mov-tipo-comprobante-buttons .option-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const val = btn.dataset.value;
+      const hidden = document.getElementById("mov-tipo-comprobante");
+      if (hidden) hidden.value = val;
+      AppState.movementForm.tipoComprobante = val;
+      updateComprobanteCampos();
+    });
+  });
+
+  // Validación exclusivamente numérica para DNI (8 dígitos) y RUC (11 dígitos)
+  const dniInput = document.getElementById("mov-doc-dni");
+  if (dniInput) {
+    dniInput.addEventListener("input", (e) => {
+      e.target.value = e.target.value.replace(/[^0-9]/g, "").slice(0, 8);
+      AppState.movementForm.documentoComprobante = e.target.value;
+    });
+  }
+  const rucInput = document.getElementById("mov-doc-ruc");
+  if (rucInput) {
+    rucInput.addEventListener("input", (e) => {
+      e.target.value = e.target.value.replace(/[^0-9]/g, "").slice(0, 11);
+      AppState.movementForm.documentoComprobante = e.target.value;
+    });
+  }
+
   // Botones de Observación en SALIDA (Venta en tienda y Venta por whatsapp)
   document.querySelectorAll("#salida-obs-buttons .option-btn").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -264,7 +332,7 @@ function bindGlobalEvents() {
     });
   });
 
-  // Botones de Observación en ENTRADA (Reposición de taller, Llegada lote confección, Ajuste de inventario)
+  // Botones de Observación en ENTRADA (Ingreso de mercadería y Devoluciones)
   document.querySelectorAll("#entrada-obs-buttons .option-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       document.querySelectorAll("#entrada-obs-buttons .option-btn").forEach(b => b.classList.remove("active"));
@@ -272,6 +340,16 @@ function bindGlobalEvents() {
       const hidden = document.getElementById("mov-observacion");
       if (hidden) hidden.value = btn.dataset.value;
       AppState.movementForm.observacionEntrada = btn.dataset.value;
+    });
+  });
+
+  // Selector de Rango de Tiempo en Dashboard Estadístico (Hoy, Este Mes, Este Año)
+  document.querySelectorAll("#stats-period-selector .stats-period-pill").forEach(pill => {
+    pill.addEventListener("click", () => {
+      document.querySelectorAll("#stats-period-selector .stats-period-pill").forEach(p => p.classList.remove("active"));
+      pill.classList.add("active");
+      AppState.statsPeriod = pill.dataset.period || "HOY";
+      renderStatsDashboard();
     });
   });
 
@@ -388,7 +466,7 @@ function switchTab(tabId) {
     targetPane.classList.remove("hidden");
   }
 
-  // Refrescar contenido según tab
+  // 1. Refrescar contenido inmediatamente con datos en memoria (cero latencia visual)
   if (tabId === "dashboard") {
     renderDashboard();
   } else if (tabId === "stock") {
@@ -400,6 +478,32 @@ function switchTab(tabId) {
   } else if (tabId === "settings") {
     renderSettingsView();
   }
+
+  // 2. Carga automática en segundo plano al entrar en Inicio ("dashboard") o "stock"
+  if (tabId === "dashboard" || tabId === "stock") {
+    triggerBackgroundSync(tabId);
+  }
+}
+
+let _bgSyncTimer = null;
+/**
+ * Dispara la descarga de datos desde Google Sheets en segundo plano
+ * de manera transparente con indicador sutil de carga.
+ */
+function triggerBackgroundSync(tabId) {
+  // Si ya hay una descarga en proceso, no duplicar la llamada
+  if (AppState.isLoading) return;
+
+  // Umbral de 2 segundos para evitar descargas consecutivas innecesarias al alternar rápido
+  const now = Date.now();
+  if (AppState.lastSyncTime && (now - AppState.lastSyncTime < 2000)) {
+    return;
+  }
+
+  clearTimeout(_bgSyncTimer);
+  _bgSyncTimer = setTimeout(() => {
+    loadAppData({ background: true });
+  }, 120);
 }
 
 /**
@@ -456,16 +560,59 @@ function hideLoginAlert() {
 }
 
 /**
- * Carga de Datos (Stock y Movimientos)
+ * Controla los indicadores de sincronización:
+ * - Botón de sincronización con animación de giro (.rotating)
+ * - Barra sutil de carga bajo el header (#subtle-sync-bar)
+ * - Etiqueta de estado en Inicio (#dashboard-sync-tag)
  */
-async function loadAppData() {
+function setSyncIndicators(isActive, isBackground = false) {
+  const syncBtn = document.getElementById("sync-btn");
+  const subtleBar = document.getElementById("subtle-sync-bar");
+
+  if (syncBtn) {
+    if (isActive) {
+      syncBtn.classList.add("rotating");
+      syncBtn.setAttribute("aria-busy", "true");
+      syncBtn.title = isBackground ? "Actualizando en segundo plano..." : "Sincronizando con Google Sheets...";
+    } else {
+      syncBtn.classList.remove("rotating");
+      syncBtn.removeAttribute("aria-busy");
+      syncBtn.title = "Sincronizar con Google Sheets";
+    }
+  }
+
+  if (subtleBar) {
+    if (isActive) {
+      subtleBar.classList.remove("hidden");
+    } else {
+      subtleBar.classList.add("hidden");
+    }
+  }
+
+  if (isActive) {
+    updateSyncStatus(isBackground ? "Actualizando en segundo plano..." : "Sincronizando...", true);
+  }
+}
+
+/**
+ * Carga de Datos (Stock y Movimientos) desde Google Sheets
+ * Permite ejecución transparente en segundo plano o forzada manual
+ */
+async function loadAppData(options = {}) {
+  const isBackground = !!options.background;
+  const isForce = !!options.force;
+
+  if (AppState.isLoading && !isForce) {
+    return { success: true, alreadyRunning: true };
+  }
+
   AppState.isLoading = true;
-  updateSyncStatus("Sincronizando...", true);
+  setSyncIndicators(true, isBackground);
 
   try {
     const [stockRes, movsRes] = await Promise.all([
       window.api.getStock(),
-      window.api.getMovements(40)
+      window.api.getMovements(50)
     ]);
 
     if (stockRes.success && stockRes.data) {
@@ -475,31 +622,45 @@ async function loadAppData() {
       AppState.movements = movsRes.data;
     }
 
-    renderDashboard();
-    renderStockList();
-    populateProductSelect();
-    renderRecentMovements();
+    // Refrescar las vistas activas con los nuevos datos recibidos
+    if (AppState.activeTab === "dashboard") {
+      renderDashboard();
+    } else if (AppState.activeTab === "stock") {
+      renderStockList();
+    } else if (AppState.activeTab === "movimientos") {
+      populateProductSelect();
+      renderRecentMovements();
+      updateStockPreview();
+    }
 
+    AppState.lastSyncTime = Date.now();
     const isDemo = window.api.isDemoMode;
     updateSyncStatus(isDemo ? "Modo Demo Activo" : "Conectado a Google Sheets", false);
+
+    return { success: true };
 
   } catch (err) {
     console.error("Error al cargar datos:", err);
     updateSyncStatus("Modo Fuera de Línea", false);
+    return { success: false, error: err };
   } finally {
     AppState.isLoading = false;
+    setSyncIndicators(false, isBackground);
   }
 }
 
+/**
+ * Sincronización manual forzada desde el botón de la barra superior
+ */
 async function syncAllData(manual = false) {
-  const syncBtn = document.getElementById("sync-btn");
-  if (syncBtn) syncBtn.classList.add("rotating");
+  const res = await loadAppData({ force: manual, background: !manual });
 
-  await loadAppData();
-
-  if (syncBtn) syncBtn.classList.remove("rotating");
   if (manual) {
-    showToast("Datos sincronizados con éxito", "success");
+    if (res && res.success) {
+      showToast("Datos sincronizados con éxito", "success");
+    } else {
+      showToast("Modo Fuera de Línea: usando datos en memoria", "warning");
+    }
   }
 }
 
@@ -606,14 +767,12 @@ function renderDashboard() {
     }
   });
 
-  // Inyectar en elementos KPI
+  // Inyectar en elementos KPI (Camisas en Stock, Bajo Stock, Agotados)
   const kpiTotal = document.getElementById("kpi-total-unidades");
-  const kpiModelos = document.getElementById("kpi-total-modelos");
   const kpiBajo = document.getElementById("kpi-bajo-stock");
   const kpiAgotados = document.getElementById("kpi-agotados");
 
   if (kpiTotal) kpiTotal.textContent = totalUnidades;
-  if (kpiModelos) kpiModelos.textContent = productGroups.length;
   if (kpiBajo) kpiBajo.textContent = bajoStock;
   if (kpiAgotados) kpiAgotados.textContent = agotados;
 
@@ -670,6 +829,9 @@ function renderDashboard() {
       }).join("");
     }
   }
+
+  // Renderizar Dashboard Estadístico de Ventas (KPIs, Gráfico SVG y Top 3)
+  renderStatsDashboard();
 }
 
 /**
@@ -695,25 +857,41 @@ function renderStockList() {
       if (!matchName && !matchCode) return false;
     }
 
-    // 2. Filtro por Talla
+    // 2. Filtro por Talla y Disponibilidad combinados
     if (sizeFilter !== "ALL") {
-      const hasSize = group.variants.some(v => String(v.talla || "").trim().toUpperCase() === sizeFilter.toUpperCase());
-      if (!hasSize) return false;
-    }
+      // Buscar la variante específica para la talla seleccionada
+      const targetVariant = group.variants.find(v => 
+        String(v.talla || "").trim().toUpperCase() === sizeFilter.toUpperCase()
+      );
 
-    // 3. Filtro por Disponibilidad
-    if (availFilter === "IN_STOCK") {
-      const allIn = group.variants.every(v => (Number(v.stockDisponible) || 0) > 5);
-      if (!allIn) return false;
-    } else if (availFilter === "LOW_STOCK") {
-      const hasLow = group.variants.some(v => {
-        const d = Number(v.stockDisponible) || 0;
-        return d > 0 && d <= 5;
-      });
-      if (!hasLow) return false;
-    } else if (availFilter === "OUT_OF_STOCK") {
-      const hasOut = group.variants.some(v => (Number(v.stockDisponible) || 0) === 0);
-      if (!hasOut) return false;
+      // Si el modelo ni siquiera tiene esta talla, se descarta
+      if (!targetVariant) return false;
+
+      const targetStock = Number(targetVariant.stockDisponible) || 0;
+
+      // Evaluar la disponibilidad EXCLUSIVAMENTE sobre esa talla seleccionada
+      if (availFilter === "IN_STOCK") {
+        if (targetStock <= 5) return false;
+      } else if (availFilter === "LOW_STOCK") {
+        if (targetStock <= 0 || targetStock > 5) return false;
+      } else if (availFilter === "OUT_OF_STOCK") {
+        if (targetStock > 0) return false;
+      }
+    } else {
+      // Si sizeFilter === "ALL", evaluar la disponibilidad a nivel global del modelo
+      if (availFilter === "IN_STOCK") {
+        const allIn = group.variants.every(v => (Number(v.stockDisponible) || 0) > 5);
+        if (!allIn) return false;
+      } else if (availFilter === "LOW_STOCK") {
+        const hasLow = group.variants.some(v => {
+          const d = Number(v.stockDisponible) || 0;
+          return d > 0 && d <= 5;
+        });
+        if (!hasLow) return false;
+      } else if (availFilter === "OUT_OF_STOCK") {
+        const hasOut = group.variants.some(v => (Number(v.stockDisponible) || 0) <= 0);
+        if (!hasOut) return false;
+      }
     }
 
     return true;
@@ -751,12 +929,24 @@ function renderStockList() {
 
   container.innerHTML = filtered.map(group => {
     let badgeHtml = "";
-    if (group.hasOutOfStock) {
-      badgeHtml = `<span class="product-status-pill out-stock"><span style="font-weight:900;">✖</span> Agotado</span>`;
-    } else if (group.hasLowStock) {
-      badgeHtml = `<span class="product-status-pill low-stock"><span style="font-size:0.8rem;">⚠️</span> Stock Bajo</span>`;
+    if (sizeFilter !== "ALL") {
+      const targetVar = group.variants.find(v => String(v.talla || "").trim().toUpperCase() === sizeFilter.toUpperCase());
+      const d = targetVar ? (Number(targetVar.stockDisponible) || 0) : 0;
+      if (d <= 0) {
+        badgeHtml = `<span class="product-status-pill out-stock"><span style="font-weight:900;">✖</span> Agotado</span>`;
+      } else if (d <= 5) {
+        badgeHtml = `<span class="product-status-pill low-stock"><span style="font-size:0.8rem;">⚠️</span> Stock Bajo</span>`;
+      } else {
+        badgeHtml = `<span class="product-status-pill in-stock"><span style="font-weight:900;">✓</span> En stock</span>`;
+      }
     } else {
-      badgeHtml = `<span class="product-status-pill in-stock"><span style="font-weight:900;">✓</span> En stock</span>`;
+      if (group.hasOutOfStock) {
+        badgeHtml = `<span class="product-status-pill out-stock"><span style="font-weight:900;">✖</span> Agotado</span>`;
+      } else if (group.hasLowStock) {
+        badgeHtml = `<span class="product-status-pill low-stock"><span style="font-size:0.8rem;">⚠️</span> Stock Bajo</span>`;
+      } else {
+        badgeHtml = `<span class="product-status-pill in-stock"><span style="font-weight:900;">✓</span> En stock</span>`;
+      }
     }
 
     const tallasStr = group.variants.map(v => escapeHtml(v.talla)).join(", ");
@@ -782,8 +972,24 @@ function renderStockList() {
               if (disp === 0) qtyClass = "qty-out";
               else if (disp <= 5) qtyClass = "qty-low";
 
+              // Resaltado exclusivo si hay un filtro de talla activo
+              const isTargetSize = sizeFilter !== "ALL" && String(v.talla || "").trim().toUpperCase() === sizeFilter.toUpperCase();
+              let isHighlightRed = false;
+
+              if (isTargetSize) {
+                if (disp === 0 || availFilter === "OUT_OF_STOCK") {
+                  isHighlightRed = true;
+                } else if (availFilter === "LOW_STOCK" && disp > 0 && disp <= 5) {
+                  isHighlightRed = true;
+                } else if (availFilter === "IN_STOCK" && disp > 5) {
+                  isHighlightRed = true;
+                }
+              }
+
+              const highlightClass = isHighlightRed ? "highlight-target-size" : "";
+
               return `
-                <div class="size-col" onclick="event.stopPropagation(); quickMoveAction('${escapeHtml(v.codigo)}')">
+                <div class="size-col ${highlightClass}" onclick="event.stopPropagation(); quickMoveAction('${escapeHtml(v.codigo)}')">
                   <span class="col-size-name">${escapeHtml(v.talla)}</span>
                   <span class="col-size-qty ${qtyClass}">${disp}</span>
                   <span class="col-size-unit ${qtyClass}">unid.</span>
@@ -793,7 +999,7 @@ function renderStockList() {
           </div>
           <div class="strip-chevron">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <polyline points="9 18 15 12 9 6"></polyline>
+              <path d="M9 18l6-6-6-6"/>
             </svg>
           </div>
         </div>
@@ -871,12 +1077,12 @@ function populateProductSelect() {
 }
 
 /**
- * Actualiza el indicador de stock bajo cada uno de los 4 botones de talla
+ * Actualiza el indicador de stock bajo cada uno de los botones de talla (S, M, L, XL, XXL)
  */
 function updateSizeButtonsStock() {
   const selectedArticulo = AppState.movementForm.selectedArticulo;
   const isSalida = AppState.movementForm.tipo === "SALIDA";
-  const sizes = ["S", "M", "L", "XL"];
+  const sizes = ["S", "M", "L", "XL", "XXL"];
 
   sizes.forEach(size => {
     const subEl = document.getElementById(`size-stock-${size}`);
@@ -1019,6 +1225,23 @@ window.quickMoveAction = function(codigo) {
 };
 
 /**
+ * Alterna entre el campo de DNI y RUC según el tipo de comprobante seleccionado
+ */
+function updateComprobanteCampos() {
+  const tipo = AppState.movementForm.tipoComprobante || "Boleta";
+  const dniGroup = document.getElementById("campo-dni-group");
+  const rucGroup = document.getElementById("campo-ruc-group");
+  if (tipo === "Factura") {
+    if (dniGroup) dniGroup.classList.add("hidden");
+    if (rucGroup) rucGroup.classList.remove("hidden");
+  } else {
+    // Boleta por defecto
+    if (dniGroup) dniGroup.classList.remove("hidden");
+    if (rucGroup) rucGroup.classList.add("hidden");
+  }
+}
+
+/**
  * Selector de Tipo de Movimiento (ENTRADA vs SALIDA)
  */
 function setMovementType(tipo) {
@@ -1077,6 +1300,41 @@ function setMovementType(tipo) {
         AppState.movementForm.tipoVenta = firstTv.dataset.value;
       }
     }
+
+    // Asegurar que el primer botón de forma de pago esté activo
+    const activeFp = document.querySelector("#mov-forma-pago-buttons .option-btn.active");
+    if (!activeFp) {
+      const firstFp = document.querySelector("#mov-forma-pago-buttons .option-btn");
+      if (firstFp) {
+        firstFp.classList.add("active");
+        const hiddenFp = document.getElementById("mov-forma-pago");
+        if (hiddenFp) hiddenFp.value = firstFp.dataset.value;
+        AppState.movementForm.formaPago = firstFp.dataset.value;
+      }
+    }
+
+    // Asegurar estado de comprobante de pago
+    const activeCp = document.querySelector("#mov-comprobante-pago-buttons .option-btn.active");
+    if (!activeCp) {
+      const noBtn = document.querySelector("#mov-comprobante-pago-buttons .option-btn[data-value='NO']") ||
+                    document.querySelector("#mov-comprobante-pago-buttons .option-btn");
+      if (noBtn) {
+        noBtn.classList.add("active");
+        const hiddenCp = document.getElementById("mov-comprobante-pago");
+        if (hiddenCp) hiddenCp.value = noBtn.dataset.value;
+        AppState.movementForm.comprobantePago = noBtn.dataset.value;
+      }
+    }
+    const compGroup = document.getElementById("comprobante-detalles-group");
+    if (compGroup) {
+      if (AppState.movementForm.comprobantePago === "SI") {
+        compGroup.classList.remove("hidden");
+        updateComprobanteCampos();
+      } else {
+        compGroup.classList.add("hidden");
+      }
+    }
+
     // Asegurar que el primer botón de observación de salida esté activo
     const activeObsSal = document.querySelector("#salida-obs-buttons .option-btn.active");
     if (!activeObsSal) {
@@ -1118,7 +1376,7 @@ function updateStockPreview() {
   }
 
   if (!selectedSize) {
-    previewBox.innerHTML = `<span style="color:var(--text-muted);">Selecciona una talla (S, M, L, XL) para calcular el stock</span>`;
+    previewBox.innerHTML = `<span style="color:var(--text-muted);">Selecciona una talla para calcular el stock</span>`;
     return;
   }
 
@@ -1139,10 +1397,10 @@ function updateStockPreview() {
           Código: <b class="badge-code">${escapeHtml(codigo)}</b> | Stock actual: <b>${stockActual} unid.</b>
         </span>
         <span style="font-size:0.85rem; font-weight:800; color:${(isOutOfStock || isExceeded) ? 'var(--danger)' : 'var(--text-main)'}">
-          ${isOutOfStock ? '❌ Venta bloqueada: Artículo agotado (0 unid.)' : (isExceeded ? `⚠️ Venta bloqueada: Cantidad supera stock disponible` : `Stock tras venta: <b>${stockFinal} unid.</b>`)}
+          ${isOutOfStock ? '❌ Venta bloqueada' : (isExceeded ? `⚠️ Venta bloqueada: Cantidad supera stock disponible` : `Stock tras venta: <b>${stockFinal} unid.</b>`)}
         </span>
       </div>
-      ${isOutOfStock ? `<span class="badge-stock badge-out-stock">🚫 Agotado (0)</span>` : (isExceeded ? `<span class="badge-stock badge-out-stock">⚠️ Excede stock</span>` : '')}
+      ${isOutOfStock ? `<span class="badge-stock badge-out-stock">🚫 Agotado</span>` : (isExceeded ? `<span class="badge-stock badge-out-stock">⚠️ Excede stock</span>` : '')}
     `;
 
   } else {
@@ -1209,6 +1467,10 @@ async function handleMovementSubmit(e) {
   let precioVenta = null;
   let tipoVenta = "";
   let precioSinIgv = null;
+  let formaPago = "Efectivo";
+  let comprobanteFinal = "NO";
+  let tipoComprobanteFinal = "";
+  let docComprobanteFinal = "";
 
   if (tipo === "SALIDA") {
     // Validaciones exclusivas de SALIDA
@@ -1247,6 +1509,52 @@ async function handleMovementSubmit(e) {
     const sinIgvVal = precioVenta - (precioVenta * 0.18);
     precioSinIgv = parseFloat((Math.round(sinIgvVal * 100) / 100).toFixed(2));
 
+    // Forma de Pago (Efectivo, Transferencia, Yape)
+    const formaPagoEl = document.getElementById("mov-forma-pago");
+    formaPago = (formaPagoEl && formaPagoEl.value.trim()) || AppState.movementForm.formaPago || "Efectivo";
+    if (!formaPago) {
+      showToast("Selecciona la forma de pago (Efectivo, Transferencia o Yape).", "error");
+      return;
+    }
+
+    // Comprobante de Pago (SI / NO)
+    const compEl = document.getElementById("mov-comprobante-pago");
+    const compChoice = (compEl && compEl.value.trim().toUpperCase()) || (AppState.movementForm.comprobantePago || "NO").toUpperCase();
+
+    comprobanteFinal = "NO";
+    tipoComprobanteFinal = "";
+    docComprobanteFinal = "";
+
+    if (compChoice === "SI") {
+      const tcEl = document.getElementById("mov-tipo-comprobante");
+      tipoComprobanteFinal = (tcEl && tcEl.value.trim()) || AppState.movementForm.tipoComprobante || "Boleta";
+
+      if (tipoComprobanteFinal === "Boleta") {
+        const dniInput = document.getElementById("mov-doc-dni");
+        const dni = dniInput ? dniInput.value.trim() : "";
+        if (!dni || !/^\d{8}$/.test(dni)) {
+          showToast("Para Boleta, ingresa un número de DNI válido (8 dígitos numéricos).", "error");
+          if (dniInput) dniInput.focus();
+          return;
+        }
+        docComprobanteFinal = dni;
+        comprobanteFinal = `Boleta - DNI: ${dni}`;
+      } else if (tipoComprobanteFinal === "Factura") {
+        const rucInput = document.getElementById("mov-doc-ruc");
+        const ruc = rucInput ? rucInput.value.trim() : "";
+        if (!ruc || !/^\d{11}$/.test(ruc)) {
+          showToast("Para Factura, ingresa un número de RUC válido (11 dígitos numéricos).", "error");
+          if (rucInput) rucInput.focus();
+          return;
+        }
+        docComprobanteFinal = ruc;
+        comprobanteFinal = `Factura - RUC: ${ruc}`;
+      } else {
+        showToast("Selecciona el tipo de comprobante (Boleta o Factura).", "error");
+        return;
+      }
+    }
+
     // Observación de SALIDA (Columna I)
     const obsSelect = document.getElementById("mov-salida-observacion");
     observacion = (obsSelect && obsSelect.value.trim()) || AppState.movementForm.observacionSalida || "Venta en tienda";
@@ -1256,9 +1564,9 @@ async function handleMovementSubmit(e) {
     }
 
   } else {
-    // Modo ENTRADA: Botones de observación de entrada (F, G, H quedan vacías)
+    // Modo ENTRADA: Botones de observación de entrada (Ingreso de mercadería y Devoluciones)
     const obsInput = document.getElementById("mov-observacion");
-    observacion = (obsInput && obsInput.value.trim()) || AppState.movementForm.observacionEntrada || "Reposición de taller";
+    observacion = (obsInput && obsInput.value.trim()) || AppState.movementForm.observacionEntrada || "Ingreso de mercadería";
     if (!observacion) {
       showToast("Selecciona una observación para la entrada.", "error");
       return;
@@ -1280,10 +1588,16 @@ async function handleMovementSubmit(e) {
     `MOV-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
   try {
+    const activeCreds = (window.api && window.api.getCurrentUserCredentials) ? window.api.getCurrentUserCredentials() : null;
+    const activeUsuario = (AppState.user && AppState.user.usuario) || (activeCreds && activeCreds.usuario) || "Admin";
+    const activePassword = (AppState.user && AppState.user.password) || (activeCreds && activeCreds.password) || "";
+
     const payload = {
-      usuario: AppState.user ? AppState.user.usuario : "Admin",
+      usuario: activeUsuario,
+      password: activePassword,
       tipo: tipo,
       codigo: codigo,
+      articulo: selectedArticulo || "",
       cantidad: cantidad,
       observacion: observacion,
       requestId: requestId
@@ -1293,6 +1607,10 @@ async function handleMovementSubmit(e) {
       payload.precioVenta = precioVenta;
       payload.tipoVenta = tipoVenta;
       payload.precioSinIgv = precioSinIgv;
+      payload.formaPago = formaPago;
+      payload.comprobantePago = comprobanteFinal;
+      payload.tipoComprobante = tipoComprobanteFinal;
+      payload.documentoComprobante = docComprobanteFinal;
     }
 
     const res = await window.api.addMovement(payload);
@@ -1323,6 +1641,43 @@ async function handleMovementSubmit(e) {
         if (tvHidden) tvHidden.value = "Unitario";
         AppState.movementForm.tipoVenta = "Unitario";
 
+        // Reset Forma de Pago a Efectivo (primer botón siempre seleccionado por defecto)
+        document.querySelectorAll("#mov-forma-pago-buttons .option-btn").forEach((b, idx) => {
+          if (idx === 0 || b.dataset.value === "Efectivo") b.classList.add("active");
+          else b.classList.remove("active");
+        });
+        const fpHidden = document.getElementById("mov-forma-pago");
+        if (fpHidden) fpHidden.value = "Efectivo";
+        AppState.movementForm.formaPago = "Efectivo";
+
+        // Reset Comprobante de Pago a NO
+        document.querySelectorAll("#mov-comprobante-pago-buttons .option-btn").forEach(b => {
+          if (b.dataset.value === "NO") b.classList.add("active");
+          else b.classList.remove("active");
+        });
+        const cpHidden = document.getElementById("mov-comprobante-pago");
+        if (cpHidden) cpHidden.value = "NO";
+        AppState.movementForm.comprobantePago = "NO";
+
+        const compGroup = document.getElementById("comprobante-detalles-group");
+        if (compGroup) compGroup.classList.add("hidden");
+
+        // Reset Tipo de Comprobante a Boleta
+        document.querySelectorAll("#mov-tipo-comprobante-buttons .option-btn").forEach((b, idx) => {
+          if (idx === 0 || b.dataset.value === "Boleta") b.classList.add("active");
+          else b.classList.remove("active");
+        });
+        const tcHidden = document.getElementById("mov-tipo-comprobante");
+        if (tcHidden) tcHidden.value = "Boleta";
+        AppState.movementForm.tipoComprobante = "Boleta";
+
+        const dniInp = document.getElementById("mov-doc-dni");
+        if (dniInp) dniInp.value = "";
+        const rucInp = document.getElementById("mov-doc-ruc");
+        if (rucInp) rucInp.value = "";
+        AppState.movementForm.documentoComprobante = "";
+        updateComprobanteCampos();
+
         // Reset Observación Salida a Venta en tienda (primer botón siempre seleccionado por defecto)
         document.querySelectorAll("#salida-obs-buttons .option-btn").forEach((b, idx) => {
           if (idx === 0 || b.dataset.value === "Venta en tienda") b.classList.add("active");
@@ -1333,14 +1688,14 @@ async function handleMovementSubmit(e) {
         AppState.movementForm.observacionSalida = "Venta en tienda";
 
       } else {
-        // Reset Observación Entrada a Reposición de taller (primer botón siempre seleccionado por defecto)
+        // Reset Observación Entrada a Ingreso de mercadería (primer botón siempre seleccionado por defecto)
         document.querySelectorAll("#entrada-obs-buttons .option-btn").forEach((b, idx) => {
-          if (idx === 0 || b.dataset.value === "Reposición de taller") b.classList.add("active");
+          if (idx === 0 || b.dataset.value === "Ingreso de mercadería") b.classList.add("active");
           else b.classList.remove("active");
         });
         const obsEntHidden = document.getElementById("mov-observacion");
-        if (obsEntHidden) obsEntHidden.value = "Reposición de taller";
-        AppState.movementForm.observacionEntrada = "Reposición de taller";
+        if (obsEntHidden) obsEntHidden.value = "Ingreso de mercadería";
+        AppState.movementForm.observacionEntrada = "Ingreso de mercadería";
       }
 
       // Sincronizar datos con Google Sheets
@@ -1360,6 +1715,70 @@ async function handleMovementSubmit(e) {
       if (originalText) submitBtn.innerHTML = originalText;
     }
   }
+}
+
+/**
+ * Parsea de manera robusta cualquier formato de fecha de Google Sheets o JS
+ */
+function parseMovementDate(raw) {
+  if (!raw) return null;
+  if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
+  let d = new Date(raw);
+  if (isNaN(d.getTime())) {
+    const isoMatch = String(raw).match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+    if (isoMatch) {
+      d = new Date(
+        parseInt(isoMatch[1], 10),
+        parseInt(isoMatch[2], 10) - 1,
+        parseInt(isoMatch[3], 10),
+        isoMatch[4] ? parseInt(isoMatch[4], 10) : 0,
+        isoMatch[5] ? parseInt(isoMatch[5], 10) : 0,
+        isoMatch[6] ? parseInt(isoMatch[6], 10) : 0
+      );
+    } else {
+      const ddmmyyyy = String(raw).match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+      if (ddmmyyyy) {
+        d = new Date(
+          parseInt(ddmmyyyy[3], 10),
+          parseInt(ddmmyyyy[2], 10) - 1,
+          parseInt(ddmmyyyy[1], 10),
+          ddmmyyyy[4] ? parseInt(ddmmyyyy[4], 10) : 0,
+          ddmmyyyy[5] ? parseInt(ddmmyyyy[5], 10) : 0,
+          ddmmyyyy[6] ? parseInt(ddmmyyyy[6], 10) : 0
+        );
+      }
+    }
+  }
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Convierte cualquier fecha u hora (incluyendo cadenas como "Mon Nov 09 2026 19:36:30 GMT-0500 (hora estándar de Colombia)"
+ * o "2026-11-09 19:36:30") en un formato amigable y de fácil lectura:
+ * "Lunes 09 de Noviembre, 2026 a las 07:36:30 P.M."
+ */
+function formatFechaHora(fechaRaw) {
+  if (!fechaRaw) return "";
+  const d = parseMovementDate(fechaRaw);
+  if (!d || isNaN(d.getTime())) return String(fechaRaw);
+
+  const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+  const meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+
+  const diaNombre = dias[d.getDay()];
+  const diaNum = String(d.getDate()).padStart(2, "0");
+  const mesNombre = meses[d.getMonth()];
+  const anio = d.getFullYear();
+
+  let horas = d.getHours();
+  const ampm = horas >= 12 ? "P.M." : "A.M.";
+  horas = horas % 12;
+  horas = horas ? horas : 12;
+  const horasStr = String(horas).padStart(2, "0");
+  const minutos = String(d.getMinutes()).padStart(2, "0");
+  const segundos = String(d.getSeconds()).padStart(2, "0");
+
+  return `${diaNombre} ${diaNum} de ${mesNombre}, ${anio} a las ${horasStr}:${minutos}:${segundos} ${ampm}`;
 }
 
 /**
@@ -1384,6 +1803,10 @@ function renderRecentMovements() {
     const isEntrada = m.tipo === "ENTRADA";
     const hasSaleData = !isEntrada && m.precioVenta !== null && m.precioVenta !== undefined && m.precioVenta !== "";
     const saleTag = hasSaleData ? ` • <b>S/ ${Number(m.precioVenta).toFixed(2)}</b> (${escapeHtml(m.tipoVenta || 'Venta')})` : '';
+    const pagoTag = (!isEntrada && m.formaPago) ? ` • <span style="color:var(--primary); font-weight:600;">${escapeHtml(m.formaPago)}</span>` : '';
+    const compTag = (!isEntrada && m.comprobantePago && m.comprobantePago !== 'NO') ? ` • <span style="font-weight:600;">[${escapeHtml(m.comprobantePago)}]</span>` : '';
+    const fechaLegible = formatFechaHora(m.fechaHora);
+    const nombreArticulo = getProductName(m.codigo, m.articulo);
 
     return `
       <div class="movement-item">
@@ -1392,8 +1815,8 @@ function renderRecentMovements() {
             ${isEntrada ? '↓' : '↑'}
           </div>
           <div class="mov-info">
-            <h4>${escapeHtml(m.articulo || m.codigo)}</h4>
-            <p>${escapeHtml(m.fechaHora || '')}${saleTag} • <i>${escapeHtml(m.observacion || 'Sin observación')}</i></p>
+            <h4>${escapeHtml(nombreArticulo)}</h4>
+            <p>${escapeHtml(fechaLegible || '')}${saleTag}${pagoTag}${compTag} • <i>${escapeHtml(m.observacion || 'Sin observación')}</i></p>
           </div>
         </div>
         <div class="mov-qty">
@@ -1574,4 +1997,373 @@ function getEyeIcon() {
 
 function getEyeOffIcon() {
   return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+}
+
+/**
+ * ===================================================
+ * DASHBOARD ESTADÍSTICO DE VENTAS (Métricas y Gráficos)
+ * Procesado 100% en memoria del cliente sin peticiones adicionales
+ * ===================================================
+ */
+
+/**
+ * Resuelve el nombre del artículo a partir de su código o descripción,
+ * buscando en el catálogo de stock en memoria para evitar mostrar códigos tipo "C002-S".
+ */
+function getProductName(codigo, fallbackArticulo) {
+  if (fallbackArticulo && fallbackArticulo.trim() && fallbackArticulo.trim() !== String(codigo || '').trim()) {
+    return fallbackArticulo.trim();
+  }
+  const cleanCode = String(codigo || '').trim().toUpperCase();
+  if (!cleanCode) return fallbackArticulo || "Producto sin nombre";
+
+  const stock = AppState.stock || [];
+
+  // 1. Coincidencia exacta de código en el inventario de stock
+  const exact = stock.find(s => String(s.codigo || '').trim().toUpperCase() === cleanCode);
+  if (exact && exact.articulo && exact.articulo.trim()) {
+    return exact.articulo.trim();
+  }
+
+  // 2. Coincidencia por prefijo base (ej: si código es C002-S o C002-XL, el base es C002)
+  const lastDash = cleanCode.lastIndexOf('-');
+  const baseCode = lastDash > 0 ? cleanCode.substring(0, lastDash) : cleanCode;
+  
+  const baseMatch = stock.find(s => {
+    const sCod = String(s.codigo || '').trim().toUpperCase();
+    if (sCod === baseCode) return true;
+    const sDash = sCod.lastIndexOf('-');
+    const sBase = sDash > 0 ? sCod.substring(0, sDash) : sCod;
+    return sBase === baseCode;
+  });
+  if (baseMatch && baseMatch.articulo && baseMatch.articulo.trim()) {
+    return baseMatch.articulo.trim();
+  }
+
+  // 3. Coincidencia flexible donde el código empiece por baseCode
+  const startsMatch = stock.find(s => String(s.codigo || '').trim().toUpperCase().startsWith(baseCode));
+  if (startsMatch && startsMatch.articulo && startsMatch.articulo.trim()) {
+    return startsMatch.articulo.trim();
+  }
+
+  return fallbackArticulo || codigo || "Producto sin nombre";
+}
+
+/**
+ * Renderizado principal de las métricas del Dashboard Estadístico
+ */
+function renderStatsDashboard() {
+  const period = AppState.statsPeriod || "HOY";
+  const movs = AppState.movements || [];
+  const stock = AppState.stock || [];
+  const now = new Date();
+
+  // Filtrar exclusivamente ventas (SALIDA)
+  const salesMovements = movs.filter(m => m.tipo === "SALIDA");
+
+  // 1. Ventas del Día (Siempre calcula el total de hoy)
+  let ventasHoy = 0;
+  let txHoyCount = 0;
+  salesMovements.forEach(m => {
+    const d = parseMovementDate(m.fechaHora);
+    if (d && d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
+      ventasHoy += (parseFloat(m.precioVenta) || 0);
+      txHoyCount++;
+    }
+  });
+
+  // 2. Ventas del Período Seleccionado (Hoy, Este Mes, Este Año)
+  const periodSales = salesMovements.filter(m => {
+    const d = parseMovementDate(m.fechaHora);
+    if (!d) return false;
+    if (period === "HOY") {
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    } else if (period === "MES") {
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    } else if (period === "ANIO") {
+      return d.getFullYear() === now.getFullYear();
+    }
+    return true;
+  });
+
+  let totalVentasPeriodo = 0;
+  periodSales.forEach(m => {
+    totalVentasPeriodo += (parseFloat(m.precioVenta) || 0);
+  });
+
+  // Ticket Promedio (Promedio por transacción en el período seleccionado)
+  const txPeriodoCount = periodSales.length;
+  const ticketPromedio = txPeriodoCount > 0 ? (totalVentasPeriodo / txPeriodoCount) : 0;
+
+  // Alertas de Stock (Total de modelos y tallas con stock <= 5 o agotados)
+  const productGroups = groupStockByProduct(stock);
+  const criticalProductsCount = productGroups.filter(g => g.isCritical).length;
+  const criticalItemsCount = stock.filter(item => (Number(item.stockDisponible) || 0) <= 5).length;
+
+  // Actualizar Tarjetas de Resumen (KPIs)
+  const statVentasLabel = document.getElementById("stat-ventas-label");
+  const statVentasVal = document.getElementById("stat-ventas-val");
+  const statVentasHint = document.getElementById("stat-ventas-hint");
+  const statTicketVal = document.getElementById("stat-ticket-val");
+  const statTicketHint = document.getElementById("stat-ticket-hint");
+  const statAlertasVal = document.getElementById("stat-alertas-val");
+  const statAlertasHint = document.getElementById("stat-alertas-hint");
+
+  if (statVentasVal) {
+    if (period === "HOY") {
+      if (statVentasLabel) statVentasLabel.textContent = "Ventas del Día";
+      statVentasVal.textContent = `S/ ${ventasHoy.toFixed(2)}`;
+      if (statVentasHint) statVentasHint.textContent = `${txHoyCount} venta${txHoyCount === 1 ? '' : 's'} hoy`;
+    } else if (period === "MES") {
+      if (statVentasLabel) statVentasLabel.textContent = "Ventas del Mes";
+      statVentasVal.textContent = `S/ ${totalVentasPeriodo.toFixed(2)}`;
+      if (statVentasHint) statVentasHint.textContent = `Hoy: S/ ${ventasHoy.toFixed(2)} (${txPeriodoCount} en mes)`;
+    } else if (period === "ANIO") {
+      if (statVentasLabel) statVentasLabel.textContent = "Ventas del Año";
+      statVentasVal.textContent = `S/ ${totalVentasPeriodo.toFixed(2)}`;
+      if (statVentasHint) statVentasHint.textContent = `Hoy: S/ ${ventasHoy.toFixed(2)} (${txPeriodoCount} en año)`;
+    }
+  }
+
+  if (statTicketVal) {
+    statTicketVal.textContent = `S/ ${ticketPromedio.toFixed(2)}`;
+  }
+  if (statTicketHint) {
+    statTicketHint.textContent = txPeriodoCount > 0 
+      ? `${txPeriodoCount} transaccione${txPeriodoCount === 1 ? '' : 's'}`
+      : "Sin ventas en rango";
+  }
+
+  if (statAlertasVal) {
+    statAlertasVal.textContent = criticalProductsCount;
+  }
+  if (statAlertasHint) {
+    statAlertasHint.textContent = `${criticalItemsCount} tallas en alerta`;
+  }
+
+  // 3. Renderizar Gráfico Estadístico de Ventas (SVG Ligero)
+  const chartTitleEl = document.getElementById("stats-chart-title");
+  const chartTotalEl = document.getElementById("stats-chart-period-total");
+  const chartContainer = document.getElementById("stats-chart-container");
+
+  const periodLabels = {
+    "HOY": "Tendencia de Ventas (Hoy)",
+    "MES": "Tendencia de Ventas (Este Mes)",
+    "ANIO": `Tendencia de Ventas (${now.getFullYear()})`
+  };
+
+  if (chartTitleEl) chartTitleEl.textContent = periodLabels[period] || "Tendencia de Ventas";
+  if (chartTotalEl) chartTotalEl.textContent = `Ingresos: S/ ${totalVentasPeriodo.toFixed(2)}`;
+
+  if (chartContainer) {
+    chartContainer.innerHTML = generateSalesChartSvg(period, periodSales, totalVentasPeriodo);
+  }
+
+  // 4. Renderizar Top 3 Productos Más Vendidos
+  const topPeriodLabel = document.getElementById("stats-top-period-label");
+  if (topPeriodLabel) {
+    topPeriodLabel.textContent = period === "HOY" 
+      ? "En el día de hoy" 
+      : (period === "MES" ? "En este mes" : "En este año");
+  }
+
+  const prodMap = new Map();
+  periodSales.forEach(m => {
+    const name = getProductName(m.codigo, m.articulo);
+    if (!prodMap.has(name)) {
+      prodMap.set(name, { name, units: 0, totalMoney: 0 });
+    }
+    const r = prodMap.get(name);
+    r.units += (parseInt(m.cantidad, 10) || 1);
+    r.totalMoney += (parseFloat(m.precioVenta) || 0);
+  });
+
+  const top3 = Array.from(prodMap.values())
+    .sort((a, b) => b.units - a.units || b.totalMoney - a.totalMoney)
+    .slice(0, 3);
+
+  renderTopProducts(top3);
+}
+
+/**
+ * Genera un gráfico de barras vectorial SVG ultraligero y responsivo
+ */
+function generateSalesChartSvg(period, periodSales, totalPeriodSales) {
+  const width = 360;
+  const height = 150;
+  const padLeft = 38;
+  const padRight = 14;
+  const padTop = 22;
+  const padBottom = 26;
+  const plotW = width - padLeft - padRight;
+  const plotH = height - padTop - padBottom;
+
+  let buckets = [];
+
+  if (period === "HOY") {
+    // 7 intervalos de horas en el día comercial
+    buckets = [
+      { label: "8-10h", total: 0, minHour: 8, maxHour: 10 },
+      { label: "10-12h", total: 0, minHour: 10, maxHour: 12 },
+      { label: "12-14h", total: 0, minHour: 12, maxHour: 14 },
+      { label: "14-16h", total: 0, minHour: 14, maxHour: 16 },
+      { label: "16-18h", total: 0, minHour: 16, maxHour: 18 },
+      { label: "18-20h", total: 0, minHour: 18, maxHour: 20 },
+      { label: "20h+", total: 0, minHour: 20, maxHour: 24 }
+    ];
+
+    periodSales.forEach(m => {
+      const d = parseMovementDate(m.fechaHora);
+      if (d) {
+        const h = d.getHours();
+        const amt = parseFloat(m.precioVenta) || 0;
+        const target = buckets.find(b => h >= b.minHour && h < b.maxHour) || (h < 8 ? buckets[0] : buckets[buckets.length - 1]);
+        if (target) target.total += amt;
+      }
+    });
+  } else if (period === "MES") {
+    // 5 semanas del mes actual
+    buckets = [
+      { label: "Sem 1", total: 0, minDay: 1, maxDay: 7 },
+      { label: "Sem 2", total: 0, minDay: 8, maxDay: 14 },
+      { label: "Sem 3", total: 0, minDay: 15, maxDay: 21 },
+      { label: "Sem 4", total: 0, minDay: 22, maxDay: 28 },
+      { label: "Sem 5", total: 0, minDay: 29, maxDay: 31 }
+    ];
+
+    periodSales.forEach(m => {
+      const d = parseMovementDate(m.fechaHora);
+      if (d) {
+        const day = d.getDate();
+        const amt = parseFloat(m.precioVenta) || 0;
+        const target = buckets.find(b => day >= b.minDay && day <= b.maxDay) || buckets[buckets.length - 1];
+        if (target) target.total += amt;
+      }
+    });
+  } else if (period === "ANIO") {
+    // 12 meses del año actual
+    const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+    buckets = monthNames.map((m, idx) => ({ label: m, total: 0, monthIndex: idx }));
+
+    periodSales.forEach(m => {
+      const d = parseMovementDate(m.fechaHora);
+      if (d) {
+        const mIdx = d.getMonth();
+        const amt = parseFloat(m.precioVenta) || 0;
+        if (buckets[mIdx]) buckets[mIdx].total += amt;
+      }
+    });
+  }
+
+  const maxVal = Math.max(...buckets.map(b => b.total), 80);
+  const numBuckets = buckets.length;
+  const barGap = numBuckets > 8 ? 6 : 10;
+  const totalGaps = barGap * (numBuckets + 1);
+  const barWidth = Math.max(8, Math.floor((plotW - totalGaps) / numBuckets));
+
+  let barsSvg = "";
+  buckets.forEach((b, i) => {
+    const x = padLeft + barGap + i * (barWidth + barGap);
+    const barH = b.total > 0 ? Math.max(6, Math.round((b.total / maxVal) * plotH)) : 3;
+    const y = padTop + plotH - barH;
+    const isZero = b.total === 0;
+
+    if (!isZero) {
+      barsSvg += `
+        <rect x="${x}" y="${y}" width="${barWidth}" height="${barH}" rx="4" fill="url(#statsBarGrad)" class="stats-svg-bar">
+          <title>${b.label}: S/ ${b.total.toFixed(2)}</title>
+        </rect>
+        <text x="${x + barWidth / 2}" y="${Math.max(12, y - 4)}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#be185d">S/${Math.round(b.total)}</text>
+      `;
+    } else {
+      barsSvg += `
+        <rect x="${x}" y="${padTop + plotH - 3}" width="${barWidth}" height="3" rx="1.5" fill="#e2e8f0" class="stats-svg-empty-bar">
+          <title>${b.label}: S/ 0.00</title>
+        </rect>
+      `;
+    }
+
+    barsSvg += `
+      <text x="${x + barWidth / 2}" y="${height - 8}" text-anchor="middle" font-size="${numBuckets > 8 ? '8' : '9.5'}" font-weight="600" fill="#64748b">${b.label}</text>
+    `;
+  });
+
+  const gridYMid = padTop + plotH / 2;
+  const gridYTop = padTop;
+  const gridYBottom = padTop + plotH;
+
+  const hasAnySales = buckets.some(b => b.total > 0);
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" class="stats-svg-chart" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="statsBarGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#db2777" />
+          <stop offset="100%" stop-color="#be185d" />
+        </linearGradient>
+      </defs>
+      <!-- Guías horizontales de escala -->
+      <line x1="${padLeft}" y1="${gridYTop}" x2="${width - padRight}" y2="${gridYTop}" stroke="#f1f5f9" stroke-width="1" stroke-dasharray="3 3"/>
+      <text x="${padLeft - 4}" y="${gridYTop + 4}" text-anchor="end" font-size="8" fill="#94a3b8" font-weight="600">S/${Math.round(maxVal)}</text>
+
+      <line x1="${padLeft}" y1="${gridYMid}" x2="${width - padRight}" y2="${gridYMid}" stroke="#f1f5f9" stroke-width="1" stroke-dasharray="3 3"/>
+      <text x="${padLeft - 4}" y="${gridYMid + 3}" text-anchor="end" font-size="8" fill="#94a3b8" font-weight="600">S/${Math.round(maxVal / 2)}</text>
+
+      <line x1="${padLeft}" y1="${gridYBottom}" x2="${width - padRight}" y2="${gridYBottom}" stroke="#cbd5e1" stroke-width="1.2"/>
+      <text x="${padLeft - 4}" y="${gridYBottom + 3}" text-anchor="end" font-size="8" fill="#94a3b8" font-weight="600">S/0</text>
+
+      <!-- Barras y etiquetas -->
+      ${barsSvg}
+
+      ${!hasAnySales ? `
+        <rect x="${padLeft + 10}" y="${padTop + 20}" width="${plotW - 20}" height="${plotH - 30}" rx="8" fill="rgba(255,255,255,0.85)"/>
+        <text x="${width / 2}" y="${padTop + plotH / 2 - 2}" text-anchor="middle" font-size="11" font-weight="700" fill="#64748b">Sin ventas en este rango</text>
+        <text x="${width / 2}" y="${padTop + plotH / 2 + 14}" text-anchor="middle" font-size="9" font-weight="500" fill="#94a3b8">Registra salidas para ver la tendencia</text>
+      ` : ''}
+    </svg>
+  `;
+}
+
+/**
+ * Renderiza la lista corta del Top 3 Productos Más Vendidos
+ */
+function renderTopProducts(top3) {
+  const container = document.getElementById("stats-top-products-list");
+  if (!container) return;
+
+  if (!top3 || top3.length === 0) {
+    container.innerHTML = `
+      <div class="stats-empty-view">
+        <div style="font-size:1.6rem; margin-bottom:4px;">🛍️</div>
+        <span>Aún no hay ventas registradas en este período.</span>
+      </div>
+    `;
+    return;
+  }
+
+  const maxUnits = top3[0].units || 1;
+
+  container.innerHTML = top3.map((prod, idx) => {
+    const rankNum = idx + 1;
+    const rankClass = rankNum === 1 ? "stats-rank-1" : (rankNum === 2 ? "stats-rank-2" : "stats-rank-3");
+    const pct = Math.max(15, Math.round((prod.units / maxUnits) * 100));
+
+    return `
+      <div class="stats-top-item">
+        <div class="stats-top-row">
+          <div class="stats-top-left">
+            <span class="stats-rank-badge ${rankClass}">#${rankNum}</span>
+            <span class="stats-top-name" title="${escapeHtml(prod.name)}">${escapeHtml(prod.name)}</span>
+          </div>
+          <div class="stats-top-right">
+            <span class="stats-top-money">S/ ${prod.totalMoney.toFixed(2)}</span>
+            <span class="stats-top-units">${prod.units} unid. vendida${prod.units === 1 ? '' : 's'}</span>
+          </div>
+        </div>
+        <div class="stats-progress-track">
+          <div class="stats-progress-fill" style="width: ${pct}%"></div>
+        </div>
+      </div>
+    `;
+  }).join("");
 }

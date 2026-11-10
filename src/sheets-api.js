@@ -119,7 +119,8 @@ class SheetsAPI {
         id: found.id,
         usuario: found.usuario,
         rol: found.rol,
-        estado: found.estado
+        estado: found.estado,
+        password: cleanPass
       };
 
       this.setCurrentUser(userSession);
@@ -156,10 +157,14 @@ class SheetsAPI {
       const res = await response.json();
 
       if (res.status === "success" && res.user) {
-        this.setCurrentUser(res.user);
+        const userSession = {
+          ...res.user,
+          password: cleanPass
+        };
+        this.setCurrentUser(userSession);
         return {
           success: true,
-          user: res.user,
+          user: userSession,
           message: res.message || "Inicio de sesión exitoso."
         };
       } else {
@@ -272,7 +277,11 @@ class SheetsAPI {
       requestId,
       precioVenta,
       tipoVenta,
-      precioSinIgv
+      precioSinIgv,
+      formaPago,
+      comprobantePago,
+      tipoComprobante,
+      documentoComprobante
     } = movementData || {};
 
     // 1. Validación de requestId obligatorio
@@ -295,9 +304,15 @@ class SheetsAPI {
       return { success: false, message: "La cantidad debe ser mayor a 0." };
     }
 
+    // Extraer credenciales seguras de la sesión activa
+    const activeCreds = this.getCurrentUserCredentials();
+    const activeUser = (movementData && movementData.usuario) || (activeCreds && activeCreds.usuario) || (this.getCurrentUser() ? this.getCurrentUser().usuario : "Admin");
+    const activePassword = (movementData && movementData.password) || (activeCreds && activeCreds.password) || "";
+
     const payload = {
       action: "addMovement",
-      usuario: usuario || (this.getCurrentUser() ? this.getCurrentUser().usuario : "Admin"),
+      usuario: activeUser,
+      password: activePassword,
       tipo: tipo,
       codigo: codigo,
       cantidad: cantNum,
@@ -316,6 +331,12 @@ class SheetsAPI {
         pSinIgvNum = payload.precioVenta - (payload.precioVenta * 0.18);
       }
       payload.precioSinIgv = (pSinIgvNum !== null && !isNaN(pSinIgvNum)) ? parseFloat((Math.round(pSinIgvNum * 100) / 100).toFixed(2)) : null;
+
+      // Forma de pago y Comprobante de pago con DNI / RUC
+      payload.formaPago = (formaPago || "Efectivo").trim();
+      payload.comprobantePago = (comprobantePago || "NO").trim();
+      payload.tipoComprobante = (tipoComprobante || "").trim();
+      payload.documentoComprobante = (documentoComprobante || "").trim();
     }
 
     // 3. Modo Demo / Offline
@@ -412,6 +433,18 @@ class SheetsAPI {
     }
   }
 
+  /**
+   * Obtiene las credenciales de la sesión activa
+   */
+  getCurrentUserCredentials() {
+    const user = this.getCurrentUser();
+    if (!user) return null;
+    return {
+      usuario: user.usuario || "",
+      password: user.password || ""
+    };
+  }
+
   setCurrentUser(user) {
     if (user) {
       localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
@@ -485,6 +518,8 @@ class SheetsAPI {
       precioVenta: payload.precioVenta !== undefined ? payload.precioVenta : null,
       tipoVenta: payload.tipoVenta || "",
       precioSinIgv: payload.precioSinIgv !== undefined ? payload.precioSinIgv : null,
+      formaPago: payload.formaPago || "",
+      comprobantePago: payload.comprobantePago || "",
       observacion: payload.observacion,
       requestId: payload.requestId || ""
     };

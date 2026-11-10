@@ -12,6 +12,7 @@ window.DEMO_DATA = {
     { codigo: "CAM-001-M", articulo: "Camisa Oxford Clásica Celeste", talla: "M", entradas: 40, salidas: 36, stockDisponible: 4, precio: 85000 },
     { codigo: "CAM-001-L", articulo: "Camisa Oxford Clásica Celeste", talla: "L", entradas: 35, salidas: 15, stockDisponible: 20, precio: 85000 },
     { codigo: "CAM-001-XL", articulo: "Camisa Oxford Clásica Celeste", talla: "XL", entradas: 20, salidas: 20, stockDisponible: 0, precio: 85000 },
+    { codigo: "CAM-001-XXL", articulo: "Camisa Oxford Clásica Celeste", talla: "XXL", entradas: 10, salidas: 10, stockDisponible: 0, precio: 85000 },
     
     { codigo: "CAM-002-S", articulo: "Camisa Slim Fit Blanca Premium", talla: "S", entradas: 30, salidas: 10, stockDisponible: 20, precio: 95000 },
     { codigo: "CAM-002-M", articulo: "Camisa Slim Fit Blanca Premium", talla: "M", entradas: 50, salidas: 48, stockDisponible: 2, precio: 95000 },
@@ -29,13 +30,18 @@ window.DEMO_DATA = {
     { codigo: "CAM-004-XL", articulo: "Camisa Casual Rayas Navy", talla: "XL", entradas: 15, salidas: 9, stockDisponible: 6, precio: 89000 },
 
     { codigo: "CAM-005-M", articulo: "Camisa Negra Cuello Mao", talla: "M", entradas: 30, salidas: 27, stockDisponible: 3, precio: 98000 },
-    { codigo: "CAM-005-L", articulo: "Camisa Negra Cuello Mao", talla: "L", entradas: 25, salidas: 11, stockDisponible: 14, precio: 98000 }
+    { codigo: "CAM-005-L", articulo: "Camisa Negra Cuello Mao", talla: "L", entradas: 25, salidas: 11, stockDisponible: 14, precio: 98000 },
+    { codigo: "CAM-005-XXL", articulo: "Camisa Negra Cuello Mao", talla: "XXL", entradas: 12, salidas: 4, stockDisponible: 8, precio: 98000 }
   ],
   movements: [
-    { fechaHora: "2026-11-08 09:30:00", usuario: "admin", tipo: "ENTRADA", codigo: "CAM-001-M", articulo: "Camisa Oxford Clásica Celeste", cantidad: 20, observacion: "Llegada lote confección taller" },
-    { fechaHora: "2026-11-08 10:15:20", usuario: "mayte", tipo: "SALIDA", codigo: "CAM-002-M", articulo: "Camisa Slim Fit Blanca Premium", cantidad: 3, precioVenta: 95.00, tipoVenta: "Unitario", precioSinIgv: 77.90, observacion: "Venta en tienda" },
-    { fechaHora: "2026-11-08 11:45:00", usuario: "mati", tipo: "SALIDA", codigo: "CAM-003-M", articulo: "Camisa Lino Rosa Pastel", cantidad: 1, precioVenta: 110.00, tipoVenta: "Por Mayor", precioSinIgv: 90.20, observacion: "Venta por whatsapp" },
-    { fechaHora: "2026-11-08 14:20:10", usuario: "admin", tipo: "ENTRADA", codigo: "CAM-004-L", articulo: "Camisa Casual Rayas Navy", cantidad: 15, observacion: "Reposición de taller" },
-    { fechaHora: "2026-11-08 16:05:40", usuario: "mayte", tipo: "SALIDA", codigo: "CAM-001-M", articulo: "Camisa Oxford Clásica Celeste", cantidad: 2, precioVenta: 85.00, tipoVenta: "Unitario", precioSinIgv: 69.70, observacion: "Venta en tienda" }
+    { fechaHora: "2026-11-08 09:30:00", usuario: "admin", tipo: "ENTRADA", codigo: "CAM-001-M", articulo: "Camisa Oxford Clásica Celeste", cantidad: 20, observacion: "Ingreso de mercadería" },
+    { fechaHora: "2026-11-08 10:15:20", usuario: "mayte", tipo: "SALIDA", codigo: "CAM-002-M", articulo: "Camisa Slim Fit Blanca Premium", cantidad: 3, precioVenta: 95.00, tipoVenta: "Unitario", precioSinIgv: 77.90, formaPago: "Efectivo", comprobantePago: "NO", observacion: "Venta en tienda" },
+    { fechaHora: "2026-11-08 11:45:00", usuario: "mati", tipo: "SALIDA", codigo: "CAM-003-M", articulo: "Camisa Lino Rosa Pastel", cantidad: 1, precioVenta: 110.00, tipoVenta: "Por Mayor", precioSinIgv: 90.20, formaPago: "Yape", comprobantePago: "Boleta - DNI: 72839102", observacion: "Venta por whatsapp" },
+    { fechaHora: "2026-11-08 14:20:10", usuario: "admin", tipo: "ENTRADA", codigo: "CAM-004-L", articulo: "Camisa Casual Rayas Navy", cantidad: 15, observacion: "Ingreso de mercadería" },
+    { fechaHora: "2026-11-08 16:05:40", usuario: "mayte", tipo: "SALIDA", codigo: "CAM-001-M", articulo: "Camisa Oxford Clásica Celeste", cantidad: 2, precioVenta: 85.00, tipoVenta: "Unitario", precioSinIgv: 69.70, formaPago: "Transferencia", comprobantePago: "Factura - RUC: 20601839201", observacion: "Venta en tienda" },
+    // Movimientos del día actual para métricas y gráficos en vivo
+    { fechaHora: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} 10:30:00`; })(), usuario: "mayte", tipo: "SALIDA", codigo: "CAM-001-M", articulo: "Camisa Oxford Clásica Celeste", cantidad: 2, precioVenta: 85.00, tipoVenta: "Unitario", precioSinIgv: 69.70, formaPago: "Transferencia", comprobantePago: "Boleta - DNI: 74839201", observacion: "Venta en tienda" },
+    { fechaHora: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} 13:45:00`; })(), usuario: "mati", tipo: "SALIDA", codigo: "CAM-002-M", articulo: "Camisa Slim Fit Blanca Premium", cantidad: 1, precioVenta: 95.00, tipoVenta: "Unitario", precioSinIgv: 77.90, formaPago: "Yape", comprobantePago: "NO", observacion: "Venta en tienda" },
+    { fechaHora: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} 16:20:00`; })(), usuario: "admin", tipo: "SALIDA", codigo: "CAM-004-M", articulo: "Camisa Casual Rayas Navy", cantidad: 3, precioVenta: 89.00, tipoVenta: "Unitario", precioSinIgv: 72.98, formaPago: "Efectivo", comprobantePago: "Factura - RUC: 20601839201", observacion: "Venta por whatsapp" }
   ]
 };

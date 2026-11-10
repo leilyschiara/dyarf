@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>D'Camisas - Gestión de Inventario & Ventas</title>
+  
+  <!-- Configuración Móvil y PWA -->
+  <meta name="theme-color" content="#be185d">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="D'Camisas">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="public/icon-192.png">
+  <link rel="apple-touch-icon" href="public/icon-192.png">
+
+  <!-- Estilos CSS -->
+  <link rel="stylesheet" href="src/styles.css?v=5.7">
+</head>
+<body>
+
+  <!-- Contenedor del dispositivo móvil (Viewport) -->
+  <div id="app-viewport">
+
+    <!-- ======================================================================
+         1. PANTALLA DE LOGIN (AUTENTICACIÓN)
+         ====================================================================== -->
+    <section id="login-screen" class="login-view">
+
+      <!-- Identidad Visual / Logo Oficial con Halo Acuarela -->
+      <div class="login-brand">
+        <div class="logo-watercolor-wrapper">
+          <img id="login-logo-img" class="login-logo" src="public/logo.jpg" alt="Logo D'Camisas">
+        </div>
+        <h1>D'CAMISAS</h1>
+        <p>Inventario & Ventas en Tiempo Real</p>
+      </div>
+
+      <!-- Tarjeta de Login -->
+      <div class="login-card">
+        
+        <!-- Mensajes de alerta dinámica (Error / Bloqueado / Datos incorrectos) -->
+        <div id="login-alert" class="alert-box alert-error hidden"></div>
+
+        <form id="login-form">
+          <div class="form-group">
+            <label for="login-user">Usuario</label>
+            <div class="input-container">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+              <input type="text" id="login-user" class="app-input" placeholder="Ej: admin o vendedor" autocomplete="username" required>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="login-password">Contraseña</label>
+            <div class="input-container">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+              <input type="password" id="login-password" class="app-input" placeholder="••••••••" autocomplete="current-password" required>
+              <button type="button" id="toggle-password-btn" class="password-toggle" title="Mostrar contraseña">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="7" r="3"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <button type="submit" id="login-submit-btn" class="btn-primary mt-2">
+            Iniciar Sesión
+          </button>
+        </form>
+
+        
+      </div>
+
+      <div class="text-center" style="margin-top: 16px; font-size: 0.72rem; color: var(--text-light);">
+        Conexión segura Google Sheets & Google Apps Script
+      </div>
+    </section>
+
+    <!-- ======================================================================
+         2. PANTALLA PRINCIPAL DE LA APP (DASHBOARD & VISTAS)
+         ====================================================================== -->
+    <div id="main-app-screen" class="hidden" style="display: flex; flex-direction: column; height: 100%; position: relative;">
+      
+      <!-- HEADER PRINCIPAL CON LOGO DE MARCA -->
+      <header class="app-header">
+        <div class="brand-badge">
+          <img id="header-logo-img" class="header-logo" src="public/logo.jpg" alt="Logo">
+          <div class="brand-info">
+            <h1>D'CAMISAS</h1>
+            <span id="header-user-role">ADMINISTRADOR</span>
+          </div>
+        </div>
+
+        <div class="header-actions">
+          <!-- Botón de Sincronización en vivo -->
+          <button id="sync-btn" class="icon-btn" title="Sincronizar con Google Sheets">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+            </svg>
+          </button>
+
+          <!-- Botón de Cerrar Sesión -->
+          <button id="logout-btn" class="icon-btn" title="Cerrar sesión">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Indicador de barra de sincronización sutil en segundo plano -->
+      <div id="subtle-sync-bar" class="subtle-sync-bar hidden"></div>
+
+      <!-- ÁREA DE CONTENIDO PRINCIPAL (Con scroll) -->
+      <main class="main-content">
+        
+        <!-- ==========================================
+             TAB 1: DASHBOARD / MENÚ PRINCIPAL
+             ========================================== -->
+        <section id="tab-dashboard" class="tab-pane">
+          <!-- Bienvenida con estado de sincronización -->
+          <div class="welcome-banner">
+            <span class="sub">Panel de Control</span>
+            <h2>Hola, <span id="header-user-name">Usuario</span> 👋</h2>
+            <div id="dashboard-sync-tag" class="sync-tag">
+              ● Conectado a Google Sheets
+            </div>
+          </div>
+
+          <!-- Métricas Clave (KPIs) en una sola línea -->
+          <div class="kpi-grid">
+            <div class="kpi-card kpi-total">
+              <div class="kpi-icon-wrap">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                </svg>
+              </div>
+              <div class="kpi-value" id="kpi-total-unidades">0</div>
+              <div class="kpi-label">Camisas en Stock</div>
+            </div>
+
+            <div class="kpi-card kpi-low">
+              <div class="kpi-icon-wrap">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              <div class="kpi-value" id="kpi-bajo-stock" style="color:var(--warning);">0</div>
+              <div class="kpi-label">Bajo Stock (&le;5)</div>
+            </div>
+
+            <div class="kpi-card kpi-out">
+              <div class="kpi-icon-wrap">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>
+              </div>
+              <div class="kpi-value" id="kpi-agotados" style="color:var(--danger);">0</div>
+              <div class="kpi-label">Agotados (0)</div>
+            </div>
+          </div>
+
+          <!-- ==========================================
+               DASHBOARD ESTADÍSTICO DE VENTAS
+               ========================================== -->
+          <div class="stats-dashboard-card">
+            <!-- Encabezado con selector de rango de tiempo -->
+            <div class="stats-card-top">
+              <div class="stats-header-info">
+                <div class="stats-header-badge">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <line x1="18" y1="20" x2="18" y2="10"></line>
+                    <line x1="12" y1="20" x2="12" y2="4"></line>
+                    <line x1="6" y1="20" x2="6" y2="14"></line>
+                  </svg>
+                </div>
+                <div>
+                  <h3 class="stats-title">Dashboard Estadístico</h3>
+                  <span class="stats-sub">Métricas y rendimiento de ventas</span>
+                </div>
+              </div>
+
+              <!-- Selector de Rango: Hoy, Este Mes, Este Año -->
+              <div class="stats-period-selector" id="stats-period-selector">
+                <button type="button" class="stats-period-pill active" data-period="HOY">Hoy</button>
+                <button type="button" class="stats-period-pill" data-period="MES">Este Mes</button>
+                <button type="button" class="stats-period-pill" data-period="ANIO">Este Año</button>
+              </div>
+            </div>
+
+            <!-- 1. Tarjetas de Resumen (KPIs) -->
+            <div class="stats-kpis-container">
+              <!-- Ventas del Día -->
+              <div class="stats-kpi-item kpi-item-sales">
+                <div class="stats-kpi-top-row">
+                  <span class="stats-kpi-label" id="stat-ventas-label">Ventas del Día</span>
+                  <div class="stats-kpi-icon-wrap icon-sales">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                      <line x1="12" y1="1" x2="12" y2="23"></line>
+                      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                    </svg>
+                  </div>
+                </div>
+                <div class="stats-kpi-number" id="stat-ventas-val">S/ 0.00</div>
+                <div class="stats-kpi-subtext" id="stat-ventas-hint">0 transacciones hoy</div>
+              </div>
+
+              <!-- Ticket Promedio -->
+              <div class="stats-kpi-item kpi-item-ticket">
+                <div class="stats-kpi-top-row">
+                  <span class="stats-kpi-label">Ticket Promedio</span>
+                  <div class="stats-kpi-icon-wrap icon-ticket">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                      <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                      <line x1="7" y1="7" x2="7.01" y2="7"></line>
+                    </svg>
+                  </div>
+                </div>
+                <div class="stats-kpi-number" id="stat-ticket-val">S/ 0.00</div>
+                <div class="stats-kpi-subtext" id="stat-ticket-hint">Por venta en período</div>
+              </div>
+
+              <!-- Alertas de Stock -->
+              <div class="stats-kpi-item kpi-item-alert">
+                <div class="stats-kpi-top-row">
+                  <span class="stats-kpi-label">Alertas Stock</span>
+                  <div class="stats-kpi-icon-wrap icon-alert">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                      <line x1="12" y1="9" x2="12" y2="13"></line>
+                      <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                  </div>
+                </div>
+                <div class="stats-kpi-number" id="stat-alertas-val">0</div>
+                <div class="stats-kpi-subtext" id="stat-alertas-hint">Stock 0 o &le; 5 unid.</div>
+              </div>
+            </div>
+
+            <!-- 2. Gráfico Estadístico de Ventas -->
+            <div class="stats-chart-block">
+              <div class="stats-block-header">
+                <div>
+                  <h4 class="stats-block-title" id="stats-chart-title">Tendencia de Ventas (Hoy)</h4>
+                  <span class="stats-block-sub" id="stats-chart-period-total">Ingresos: S/ 0.00</span>
+                </div>
+                <div class="stats-chart-legend">
+                  <span class="stats-legend-dot"></span> Ventas (S/)
+                </div>
+              </div>
+              <div class="stats-chart-container" id="stats-chart-container">
+                <!-- SVG inyectado dinámicamente -->
+              </div>
+            </div>
+
+            <!-- 3. Top 3 Productos Más Vendidos -->
+            <div class="stats-top-block">
+              <div class="stats-block-header">
+                <div>
+                  <h4 class="stats-block-title">Top 3 Productos Más Vendidos</h4>
+                  <span class="stats-block-sub" id="stats-top-period-label">En el rango seleccionado</span>
+                </div>
+                <span class="stats-top-badge">⭐ Ranking</span>
+              </div>
+              <div class="stats-top-list" id="stats-top-products-list">
+                <!-- Lista inyectada dinámicamente -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Alertas de Stock Crítico (Agrupado por Producto) -->
+          <div class="critical-card-container">
+            <div class="critical-card-header" id="critical-card-toggle" onclick="toggleCriticalList()">
+              <div>
+                <h3 class="critical-card-title">Stock Crítico</h3>
+                <span class="critical-card-sub">Productos con stock bajo</span>
+              </div>
+              <div class="critical-count-pill" id="critical-count-pill">
+                <span id="critical-count-text">0 productos</span>
+                <svg id="critical-chevron-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="18 15 12 9 6 15"></polyline>
+                </svg>
+              </div>
+            </div>
+            <div id="critical-stock-list" class="critical-stock-list">
+              <!-- Inyectado dinámicamente -->
+            </div>
+          </div>
+        </section>
+
+        <!-- ==========================================
+             TAB 2: STOCK ACTUAL CON FILTROS AVANZADOS
+             ========================================== -->
+        <section id="tab-stock" class="tab-pane hidden">
+          <!-- Barra de Búsqueda y Filtros Rápidos -->
+          <div class="search-filter-card">
+            
+            <!-- Buscador predictivo en tiempo real -->
+            <div class="search-input-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input type="text" id="stock-search-input" class="search-input" placeholder="Buscar por código o modelo...">
+            </div>
+
+            <!-- Filtros por Talla -->
+            <div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); margin-bottom:4px;">
+              FILTRAR POR TALLA:
+            </div>
+            <div class="filter-pills-row" style="margin-bottom: 10px;">
+              <button class="filter-pill active pink" data-filter-size="ALL">Todas</button>
+              <button class="filter-pill" data-filter-size="S">Talla S</button>
+              <button class="filter-pill" data-filter-size="M">Talla M</button>
+              <button class="filter-pill" data-filter-size="L">Talla L</button>
+              <button class="filter-pill" data-filter-size="XL">Talla XL</button>
+              <button class="filter-pill" data-filter-size="XXL" id="filter-pill-xxl">Talla XXL</button>
+            </div>
+
+            <!-- Filtros por Estado de Disponibilidad -->
+            <div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); margin-bottom:4px;">
+              DISPONIBILIDAD:
+            </div>
+            <div class="filter-pills-row">
+              <button class="filter-pill active" data-filter-avail="ALL">Todos</button>
+              <button class="filter-pill" data-filter-avail="IN_STOCK">En Stock (&gt;5)</button>
+              <button class="filter-pill" data-filter-avail="LOW_STOCK">Bajo Stock (1-5)</button>
+              <button class="filter-pill" data-filter-avail="OUT_OF_STOCK">Agotado (0)</button>
+            </div>
+          </div>
+
+          <!-- Encabezado de Resultados y Ordenamiento -->
+          <div class="stock-results-header">
+            <span id="stock-result-count" style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">0 modelos</span>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div class="sort-select-wrap">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted);">
+                  <path d="M7 15l5 5 5-5M7 9l5-5 5 5"/>
+                </svg>
+                <span style="font-size:0.72rem; color:var(--text-muted); font-weight:600;">Ordenar por:</span>
+                <select id="stock-sort-select" class="sort-select">
+                  <option value="name_asc">Nombre A-Z</option>
+                  <option value="stock_asc">Menor stock</option>
+                  <option value="stock_desc">Mayor stock</option>
+                </select>
+              </div>
+              <small style="color:var(--primary); font-weight:600; cursor:pointer;" onclick="syncAllData(true)">🔄</small>
+            </div>
+          </div>
+
+          <!-- Contenedor de Tarjetas de Producto -->
+          <div id="stock-items-container">
+            <!-- Inyectado dinámicamente -->
+          </div>
+        </section>
+
+        <!-- ==========================================
+             TAB 3: REGISTRO DE MOVIMIENTOS
+             ========================================== -->
+        <section id="tab-movimientos" class="tab-pane hidden">
+          <div class="login-card" style="margin-bottom: 20px;">
+            <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 12px; color: var(--dark);">
+              Nuevo Movimiento
+            </h2>
+
+            <!-- Selector de Tipo: ENTRADA / SALIDA -->
+            <div class="type-selector-grid">
+              <button type="button" id="btn-tipo-salida" class="type-btn active salida">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <path d="M12 19V5M5 12l7-7 7-7"/>
+                </svg>
+                SALIDA<br>(Venta)
+              </button>
+
+              <button type="button" id="btn-tipo-entrada" class="type-btn">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <path d="M12 5v14M5 12l7 7 7-7"/>
+                </svg>
+                ENTRADA<br>(Stock)
+              </button>
+            </div>
+
+            <form id="movement-form">
+              <!-- SELECCIÓN REUTILIZABLE DE PRODUCTO Y TALLAS (ENTRADA Y SALIDA) -->
+              <div id="mov-product-group" class="form-group">
+                <label for="mov-producto-select">Producto / Modelo <span class="required-star">*</span></label>
+                <div class="input-container">
+                  <select id="mov-producto-select" class="app-input" style="padding-left:14px;">
+                    <option value="">-- Selecciona un producto --</option>
+                  </select>
+                </div>
+
+                <!-- 4 Botones de Talla Seleccionables (S, M, L, XL) -->
+                <div class="size-selector-wrap mt-3">
+                  <label style="font-size:0.75rem; font-weight:700; color:var(--text-muted); display:block; margin-bottom:6px;">
+                    Talla <span class="required-star">*</span>
+                  </label>
+                  <div class="size-buttons-grid" id="mov-size-buttons">
+                    <button type="button" class="size-btn" data-size="S">
+                      <span class="size-letter">S</span>
+                      <span class="size-stock-sub" id="size-stock-S">-</span>
+                    </button>
+                    <button type="button" class="size-btn" data-size="M">
+                      <span class="size-letter">M</span>
+                      <span class="size-stock-sub" id="size-stock-M">-</span>
+                    </button>
+                    <button type="button" class="size-btn" data-size="L">
+                      <span class="size-letter">L</span>
+                      <span class="size-stock-sub" id="size-stock-L">-</span>
+                    </button>
+                    <button type="button" class="size-btn" data-size="XL">
+                      <span class="size-letter">XL</span>
+                      <span class="size-stock-sub" id="size-stock-XL">-</span>
+                    </button>
+                    <button type="button" class="size-btn" data-size="XXL" id="btn-size-XXL">
+                      <span class="size-letter">XXL</span>
+                      <span class="size-stock-sub" id="size-stock-XXL">-</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Vista previa reactiva del cálculo de stock -->
+              <div id="stock-preview-box" class="stock-preview-box">
+                <span style="color:var(--text-muted);">Selecciona un producto y talla para calcular el stock</span>
+              </div>
+
+              <!-- Stepper Numérico para Cantidad -->
+              <div class="form-group mt-4">
+                <label for="mov-cantidad">Cantidad de Unidades <span class="required-star">*</span></label>
+                <div class="quantity-stepper">
+                  <button type="button" id="qty-minus" class="stepper-btn">-</button>
+                  <input type="number" id="mov-cantidad" class="quantity-input" value="1" min="1" max="9999" required>
+                  <button type="button" id="qty-plus" class="stepper-btn">+</button>
+                </div>
+                <div class="quick-quantities">
+                  <div class="quick-qty-chip" data-qty="1">+1 unid.</div>
+                  <div class="quick-qty-chip" data-qty="5">+5 unid.</div>
+                  <div class="quick-qty-chip" data-qty="10">+10 unid.</div>
+                  <div class="quick-qty-chip" data-qty="20">+20 unid.</div>
+                </div>
+              </div>
+
+              <!-- NUEVOS CAMPOS EXCLUSIVOS PARA SALIDA (VENTAS) -->
+              <div id="salida-sale-details">
+                <!-- 1. Precio de venta (Numérico, 2 decimales, obligatorio, sin negativos) -->
+                <div class="form-group mt-4">
+                  <label for="mov-precio-venta">Precio de Venta (S/) <span class="required-star">*</span></label>
+                  <div class="input-container">
+                    <input type="number" id="mov-precio-venta" class="app-input" step="0.01" min="0.01" placeholder="0.00" style="padding-left:14px;">
+                  </div>
+                </div>
+
+                <!-- 2. Tipo de venta (Botones interactivos estilo tallas: Unitario y Por Mayor, primer botón seleccionado) -->
+                <div class="form-group">
+                  <label>Tipo de Venta <span class="required-star">*</span></label>
+                  <div class="option-buttons-grid" id="mov-tipo-venta-buttons">
+                    <button type="button" class="option-btn active" data-value="Unitario">Unitario</button>
+                    <button type="button" class="option-btn" data-value="Por Mayor">Por Mayor</button>
+                  </div>
+                  <input type="hidden" id="mov-tipo-venta" value="Unitario">
+                </div>
+
+                <!-- 3. Precio sin IGV (Solo lectura, calculado en tiempo real: Precio de venta - (Precio de venta * 0.18)) -->
+                <div class="form-group">
+                  <label for="mov-precio-sin-igv">Precio sin IGV (S/) <span class="required-star">*</span></label>
+                  <div class="input-container">
+                    <input type="text" id="mov-precio-sin-igv" class="app-input" readonly placeholder="0.00" style="padding-left:14px; background: rgba(0,0,0,0.03); color: var(--text-main); font-weight: 700;">
+                  </div>
+                  <small style="font-size:0.72rem; color:var(--text-muted); margin-top:3px; display:block;">
+                    Cálculo automático: Precio de venta − (Precio de venta × 0.18)
+                  </small>
+                </div>
+
+                <!-- 4. Forma de pago (Botones interactivos: Efectivo, Transferencia, Yape) -->
+                <div class="form-group">
+                  <label>Forma de Pago <span class="required-star">*</span></label>
+                  <div class="option-buttons-grid cols-3" id="mov-forma-pago-buttons">
+                    <button type="button" class="option-btn active" data-value="Efectivo">Efectivo</button>
+                    <button type="button" class="option-btn" data-value="Transferencia">Transferencia</button>
+                    <button type="button" class="option-btn" data-value="Yape">Yape</button>
+                  </div>
+                  <input type="hidden" id="mov-forma-pago" value="Efectivo">
+                </div>
+
+                <!-- 5. Comprobante de pago (Botones interactivos: SI y NO) -->
+                <div class="form-group">
+                  <label>Comprobante de Pago <span class="required-star">*</span></label>
+                  <div class="option-buttons-grid" id="mov-comprobante-pago-buttons">
+                    <button type="button" class="option-btn" data-value="SI">SI</button>
+                    <button type="button" class="option-btn active" data-value="NO">NO</button>
+                  </div>
+                  <input type="hidden" id="mov-comprobante-pago" value="NO">
+                </div>
+
+                <!-- Sub-sección condicional de Comprobante (se despliega si selecciona SI) -->
+                <div id="comprobante-detalles-group" class="comprobante-subcard hidden">
+                  <label style="font-size:0.75rem; font-weight:800; color:var(--primary); margin-bottom:6px; display:block;">
+                    Tipo de Comprobante <span class="required-star">*</span>
+                  </label>
+                  <div class="option-buttons-grid" id="mov-tipo-comprobante-buttons">
+                    <button type="button" class="option-btn active" data-value="Boleta">Boleta</button>
+                    <button type="button" class="option-btn" data-value="Factura">Factura</button>
+                  </div>
+                  <input type="hidden" id="mov-tipo-comprobante" value="Boleta">
+
+                  <!-- Campo condicional para Boleta: DNI -->
+                  <div id="campo-dni-group" class="form-group mt-3" style="margin-bottom:0;">
+                    <label for="mov-doc-dni">DNI <span class="required-star">*</span></label>
+                    <div class="input-container">
+                      <input type="text" id="mov-doc-dni" class="app-input" inputmode="numeric" maxlength="8" placeholder="Ingresa 8 dígitos numéricos" style="padding-left:14px;">
+                    </div>
+                    <small style="font-size:0.7rem; color:var(--text-muted); margin-top:2px; display:block;">Solo números (8 dígitos)</small>
+                  </div>
+
+                  <!-- Campo condicional para Factura: RUC -->
+                  <div id="campo-ruc-group" class="form-group mt-3 hidden" style="margin-bottom:0;">
+                    <label for="mov-doc-ruc">RUC <span class="required-star">*</span></label>
+                    <div class="input-container">
+                      <input type="text" id="mov-doc-ruc" class="app-input" inputmode="numeric" maxlength="11" placeholder="Ingresa 11 dígitos numéricos" style="padding-left:14px;">
+                    </div>
+                    <small style="font-size:0.7rem; color:var(--text-muted); margin-top:2px; display:block;">Solo números (11 dígitos)</small>
+                  </div>
+                </div>
+              </div>
+
+              <!-- OBSERVACIÓN PARA SALIDA (Botones interactivos estilo tallas, primer botón seleccionado) -->
+              <div id="salida-obs-group" class="form-group">
+                <label>OBSERVACIÓN <span class="required-star">*</span></label>
+                <div class="option-buttons-grid" id="salida-obs-buttons">
+                  <button type="button" class="option-btn active" data-value="Venta en tienda">Venta en tienda</button>
+                  <button type="button" class="option-btn" data-value="Venta por whatsapp">Venta por whatsapp</button>
+                </div>
+                <input type="hidden" id="mov-salida-observacion" value="Venta en tienda">
+              </div>
+
+              <!-- OBSERVACIÓN PARA ENTRADA (Botones interactivos: Ingreso de mercadería y Devoluciones) -->
+              <div id="entrada-obs-group" class="form-group hidden">
+                <label>OBSERVACIÓN <span class="required-star">*</span></label>
+                <div class="option-buttons-grid" id="entrada-obs-buttons">
+                  <button type="button" class="option-btn active" data-value="Ingreso de mercadería">Ingreso de mercadería</button>
+                  <button type="button" class="option-btn" data-value="Devoluciones">Devoluciones</button>
+                </div>
+                <input type="hidden" id="mov-observacion" value="Ingreso de mercadería">
+              </div>
+
+              <button type="submit" id="mov-submit-btn" class="btn-primary mt-4">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 19V5M5 12l7-7 7-7"/>
+                </svg>
+                Registrar Salida / Venta
+              </button>
+            </form>
+          </div>
+
+          <!-- Historial de Movimientos Recientes -->
+          <div class="section-title">
+            <span>Últimos Movimientos</span>
+          </div>
+          <div id="recent-movements-container">
+            <!-- Inyectado dinámicamente -->
+          </div>
+        </section>
+
+        <!-- ==========================================
+             TAB 4: AJUSTES & CONEXIÓN GOOGLE SHEETS
+             ========================================== -->
+        <section id="tab-settings" class="tab-pane hidden">
+          
+          <!-- TARJETA DE PERFIL (Visible para todos los roles) -->
+          <div class="login-card mb-4" id="user-profile-card">
+            <div style="display: flex; align-items: center; gap: 14px;">
+              <div style="width: 46px; height: 46px; border-radius: 50%; background: var(--primary-light); color: var(--primary); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.2rem; border: 1.5px solid var(--border-focus);">
+                <span id="profile-avatar-initial">U</span>
+              </div>
+              <div style="flex: 1;">
+                <h3 id="profile-full-name" style="font-size: 0.95rem; font-weight: 800; color: var(--dark); margin: 0; line-height: 1.2;">Usuario</h3>
+                <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                  <span id="profile-username" style="font-size: 0.75rem; color: var(--text-muted); font-family: monospace;">@usuario</span>
+                  <span id="profile-role-badge" class="badge-stock badge-in-stock" style="font-size: 0.68rem; padding: 2px 8px;">Rol: Usuario</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SECCIÓN EXCLUSIVA PARA ADMINISTRADOR: Conexión Google Sheets -->
+          <div class="login-card mb-4 hidden" id="admin-connection-section">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+              <h2 style="font-size: 1.15rem; font-weight: 800; color: var(--dark); margin: 0;">
+                Conexión Google Sheets
+              </h2>
+              <span style="font-size: 0.68rem; font-weight: 700; background: var(--primary-light); color: var(--primary); padding: 2px 8px; border-radius: 9999px;">
+                Solo Administrador
+              </span>
+            </div>
+
+            <div style="margin-bottom: 14px;">
+              <span id="settings-status-badge" class="badge-stock badge-in-stock">Conectado a Google Sheets</span>
+            </div>
+
+            <div class="form-group">
+              <label for="settings-api-url">URL Web App de Google Apps Script</label>
+              <input type="url" id="settings-api-url" class="app-input" style="padding-left:14px; font-size:0.8rem;" placeholder="https://script.google.com/macros/s/.../exec">
+            </div>
+
+            <button type="button" id="test-api-btn" class="btn-secondary" style="margin-top:4px;">
+              Probar Conexión
+            </button>
+
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-top:16px; padding:12px; background:var(--bg-app); border-radius:var(--radius-sm);">
+              <div>
+                <strong style="font-size:0.85rem; display:block;">Modo Demo Offline</strong>
+                <small style="font-size:0.72rem; color:var(--text-muted);">Usa datos simulados sin conexión</small>
+              </div>
+              <input type="checkbox" id="settings-demo-toggle" style="width:20px; height:20px; accent-color:var(--primary);">
+            </div>
+
+            <button type="button" id="save-api-btn" class="btn-primary mt-4">
+              Guardar Configuración
+            </button>
+          </div>
+
+          <!-- Instrucciones de APK y PWA -->
+          <div class="login-card">
+            <h3 style="font-size: 0.95rem; font-weight: 800; margin-bottom: 8px;">📲 Instalación en Teléfono (APK)</h3>
+            <p style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.4;">
+              Esta aplicación cuenta con soporte nativo PWA e híbrido Capacitor para Android:
+            </p>
+            <ul style="font-size: 0.78rem; color: var(--text-muted); margin: 10px 0 10px 20px; line-height: 1.5;">
+              <li><b>Opción 1 (Directa):</b> Ábrela en Google Chrome en tu celular y pulsa <i>"Agregar a la pantalla principal"</i> o <i>"Instalar Aplicación"</i>. Funcionará como una app nativa con icono de la marca y sin barra de navegación.</li>
+              <li><b>Opción 2 (Archivo .APK):</b> Genera el paquete instalable directamente usando Capacitor o PWABuilder (instrucciones en <a href="#" onclick="alert('Consulta el archivo GUIA_COMPILACION_APK.md incluido en el proyecto'); return false;" style="color:var(--primary); font-weight:700;">GUIA_COMPILACION_APK.md</a>).</li>
+            </ul>
+          </div>
+        </section>
+
+      </main>
+
+      <!-- BARRA DE NAVEGACIÓN INFERIOR (TAB BAR) -->
+      <nav class="bottom-nav">
+        <button class="nav-item active" data-tab="dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
+          Inicio
+        </button>
+
+        <button class="nav-item" data-tab="stock">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
+            <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+          </svg>
+          Stock
+        </button>
+
+        <button class="nav-item" data-tab="movimientos">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"/>
+            <polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+          Movimientos
+        </button>
+
+        <button class="nav-item" data-tab="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          Ajustes
+        </button>
+      </nav>
+
+    </div>
+
+    <!-- ======================================================================
+         MODAL FLOTANTE DE CONFIGURACIÓN RÁPIDA
+         ====================================================================== -->
+    <div id="settings-modal" class="modal-overlay hidden">
+      <div class="modal-sheet">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+          <h3 style="font-size:1.1rem; font-weight:800; color:var(--dark);">⚙️ Conexión Apps Script</h3>
+          <button id="close-settings-modal" class="icon-btn" style="width:32px; height:32px;">✕</button>
+        </div>
+        
+        <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:14px;">
+          Pega la URL de tu Web App de Google Apps Script para enlazar la app con tu Google Sheets en tiempo real.
+        </p>
+
+        <div class="form-group">
+          <label>URL de Apps Script (/exec)</label>
+          <input type="url" id="modal-api-url" class="app-input" style="padding-left:14px; font-size:0.82rem;" placeholder="https://script.google.com/macros/s/.../exec">
+        </div>
+
+        <button type="button" id="modal-test-btn" class="btn-secondary mb-2" onclick="handleTestApiConnection()">
+          Probar Conexión
+        </button>
+
+        <button type="button" class="btn-primary" onclick="
+          const val = document.getElementById('modal-api-url').value;
+          document.getElementById('settings-api-url').value = val;
+          handleSaveApiSettings();
+        ">
+          Guardar y Aplicar
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Scripts de la Aplicación (Minificados para Compilación y Producción APK) -->
+  <script src="src/logo-data.min.js?v=5.8"></script>
+  <script src="src/data-demo.min.js?v=5.8"></script>
+  <script src="src/sheets-api.min.js?v=5.8"></script>
+  <script src="src/app.min.js?v=5.8"></script>
+
+  <!-- Registro de Service Worker para PWA Offline -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(err => {
+          console.log('SW registration notice:', err);
+        });
+      });
+    }
+  </script>
+</body>
+</html>

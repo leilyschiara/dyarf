@@ -348,7 +348,29 @@ function getStockData() {
 function handleAddMovement(payload) {
   Logger.log("[handleAddMovement] Payload recibido: " + JSON.stringify(payload));
 
-  // 1. Validar identificador de idempotencia (requestId obligatorio)
+  // 1. Validar autenticación obligatoria del usuario contra la pestaña 'Usuarios'
+  const inputUsuario = String(payload.usuario || "").trim();
+  const inputPassword = String(payload.password || "").trim();
+
+  if (!inputUsuario || !inputPassword) {
+    return {
+      status: "error",
+      code: "AUTH_REQUIRED",
+      message: "Credenciales requeridas: Debes proporcionar usuario y contraseña válidos para registrar movimientos."
+    };
+  }
+
+  // Validar credenciales y estado activo contra la pestaña 'Usuarios'
+  const authCheck = handleLogin(inputUsuario, inputPassword);
+  if (authCheck.status !== "success" || !authCheck.user) {
+    return {
+      status: "error",
+      code: authCheck.code || "UNAUTHORIZED",
+      message: "Acceso no autorizado: " + (authCheck.message || "Usuario o contraseña inválidos, o usuario inactivo.")
+    };
+  }
+
+  // 2. Validar identificador de idempotencia (requestId obligatorio)
   const requestId = String(payload.requestId || "").trim();
   if (!requestId) {
     return {
@@ -358,8 +380,8 @@ function handleAddMovement(payload) {
     };
   }
 
-  // 2. Validar parámetros básicos
-  const usuario = String(payload.usuario || "Admin").trim();
+  // 3. Validar parámetros básicos
+  const usuario = authCheck.user.usuario; // Usar el usuario verificado por la sesión
   const tipo = String(payload.tipo || "").trim().toUpperCase(); // 'ENTRADA' o 'SALIDA'
   const codigo = String(payload.codigo || "").trim().toUpperCase();
   const cantidad = parseInt(payload.cantidad, 10);
@@ -467,6 +489,8 @@ function handleAddMovement(payload) {
   let colPrecioVenta = 5;
   let colTipoVenta = 6;
   let colPrecioSinIgv = 7;
+  let colFormaPago = -1;
+  let colComprobantePago = -1;
   let colObs = 8;
   let colReqId = -1;
 
@@ -497,6 +521,12 @@ function handleAddMovement(payload) {
     const idxPrecioSinIgv = movHeaders.findIndex(h => h.includes("PRECIO SIN IGV") || h.includes("PRECIO_SIN_IGV"));
     if (idxPrecioSinIgv !== -1) colPrecioSinIgv = idxPrecioSinIgv;
 
+    const idxFormaPago = movHeaders.findIndex(h => h.includes("FORMA DE PAGO") || h.includes("FORMA_PAGO") || h === "PAGO");
+    if (idxFormaPago !== -1) colFormaPago = idxFormaPago;
+
+    const idxComprobantePago = movHeaders.findIndex(h => h.includes("COMPROBANTE DE PAGO") || h.includes("COMPROBANTE_PAGO") || h.includes("COMPROBANTE"));
+    if (idxComprobantePago !== -1) colComprobantePago = idxComprobantePago;
+
     const idxObs = movHeaders.findIndex(h => h.includes("OBSERVACIÓN") || h.includes("OBSERVACION"));
     if (idxObs !== -1) colObs = idxObs;
 
@@ -508,8 +538,11 @@ function handleAddMovement(payload) {
       sheetMov.getRange(1, colReqId + 1).setValue("REQUEST_ID");
     }
   } else {
-    sheetMov.appendRow(["FECHA", "USUARIO", "TIPO", "CÓDIGO", "CANTIDAD", "PRECIO DE VENTA", "TIPO DE VENTA", "PRECIO SIN IGV", "OBSERVACIÓN", "REQUEST_ID"]);
-    colReqId = 9;
+    sheetMov.appendRow(["FECHA", "USUARIO", "TIPO", "CÓDIGO", "CANTIDAD", "PRECIO DE VENTA", "TIPO DE VENTA", "PRECIO SIN IGV", "FORMA DE PAGO", "COMPROBANTE DE PAGO", "OBSERVACIÓN", "REQUEST_ID"]);
+    colFormaPago = 8;
+    colComprobantePago = 9;
+    colObs = 10;
+    colReqId = 11;
   }
 
   // 5. Comprobar idempotencia: ¿ya existe este requestId registrado?
@@ -536,6 +569,8 @@ function handleAddMovement(payload) {
             precioVenta: (colPrecioVenta !== -1 && movValues[i][colPrecioVenta] !== "") ? Number(movValues[i][colPrecioVenta]) : null,
             tipoVenta: (colTipoVenta !== -1 && movValues[i][colTipoVenta] !== "") ? String(movValues[i][colTipoVenta]) : "",
             precioSinIgv: (colPrecioSinIgv !== -1 && movValues[i][colPrecioSinIgv] !== "") ? Number(movValues[i][colPrecioSinIgv]) : null,
+            formaPago: (colFormaPago !== -1 && movValues[i][colFormaPago] !== "") ? String(movValues[i][colFormaPago]) : "",
+            comprobantePago: (colComprobantePago !== -1 && movValues[i][colComprobantePago] !== "") ? String(movValues[i][colComprobantePago]) : "",
             observacion: colObs !== -1 ? String(movValues[i][colObs]) : observacion,
             requestId: requestId
           }
@@ -544,13 +579,15 @@ function handleAddMovement(payload) {
     }
   }
 
-  // 6. Registrar en 'Movimientos' respetando las nuevas columnas (F: PRECIO DE VENTA, G: TIPO DE VENTA, H: PRECIO SIN IGV, I: OBSERVACIÓN)
+  // 6. Registrar en 'Movimientos' respetando las nuevas columnas (F: PRECIO DE VENTA, G: TIPO DE VENTA, H: PRECIO SIN IGV, I: FORMA DE PAGO, J: COMPROBANTE DE PAGO, K: OBSERVACIÓN)
   const ahora = new Date();
   const fechaHoraStr = Utilities.formatDate(ahora, Session.getScriptTimeZone() || "GMT-5", "yyyy-MM-dd HH:mm:ss");
 
   let precioVenta = null;
   let tipoVenta = "";
   let precioSinIgv = null;
+  let formaPago = "";
+  let comprobantePago = "";
 
   if (tipo === "SALIDA") {
     const rawP = (payload.precioVenta !== undefined && payload.precioVenta !== null && payload.precioVenta !== "") ? Number(payload.precioVenta) : null;
@@ -561,14 +598,34 @@ function handleAddMovement(payload) {
       precioSinIgv = parseFloat((Math.round(sinIgvCalc * 100) / 100).toFixed(2));
     }
     tipoVenta = String(payload.tipoVenta || "").trim();
+    formaPago = String(payload.formaPago || "").trim();
+
+    // Determinar formato de comprobante con DNI o RUC
+    if (payload.comprobantePago !== undefined && payload.comprobantePago !== null && String(payload.comprobantePago).trim() !== "") {
+      comprobantePago = String(payload.comprobantePago).trim();
+    } else if (payload.tipoComprobante) {
+      const tc = String(payload.tipoComprobante).trim();
+      const doc = String(payload.documentoComprobante || payload.dni || payload.ruc || "").trim();
+      if (tc.toUpperCase() === "NO") {
+        comprobantePago = "NO";
+      } else if (doc) {
+        comprobantePago = tc + " - " + (tc === "Boleta" ? "DNI: " : "RUC: ") + doc;
+      } else {
+        comprobantePago = tc;
+      }
+    } else {
+      comprobantePago = "NO";
+    }
   }
 
   const totalCols = Math.max(
-    movValues.length > 0 ? movValues[0].length : 9,
+    movValues.length > 0 ? movValues[0].length : 11,
     colReqId + 1,
     colObs + 1,
+    colComprobantePago + 1,
+    colFormaPago + 1,
     colPrecioSinIgv + 1,
-    9
+    11
   );
   const newRow = new Array(totalCols).fill("");
 
@@ -578,7 +635,7 @@ function handleAddMovement(payload) {
   if (colCod !== -1) newRow[colCod] = codigo;
   if (colCant !== -1) newRow[colCant] = cantidad;
 
-  // Columnas F, G, H solo para SALIDA (en ENTRADA se dejan vacías "")
+  // Columnas F, G, H, Forma de Pago y Comprobante de Pago solo para SALIDA (en ENTRADA se dejan vacías "")
   if (colPrecioVenta !== -1) {
     newRow[colPrecioVenta] = (tipo === "SALIDA" && precioVenta !== null) ? precioVenta : "";
   }
@@ -587,6 +644,12 @@ function handleAddMovement(payload) {
   }
   if (colPrecioSinIgv !== -1) {
     newRow[colPrecioSinIgv] = (tipo === "SALIDA" && precioSinIgv !== null) ? precioSinIgv : "";
+  }
+  if (colFormaPago !== -1) {
+    newRow[colFormaPago] = (tipo === "SALIDA" && formaPago) ? formaPago : "";
+  }
+  if (colComprobantePago !== -1) {
+    newRow[colComprobantePago] = (tipo === "SALIDA" && comprobantePago) ? comprobantePago : "";
   }
 
   if (colObs !== -1) newRow[colObs] = observacion;
@@ -660,6 +723,8 @@ function getRecentMovements(limit) {
   const colPrecioVenta = headers.findIndex(h => h.includes("PRECIO DE VENTA") || h.includes("PRECIO_VENTA"));
   const colTipoVenta = headers.findIndex(h => h.includes("TIPO DE VENTA") || h.includes("TIPO_VENTA"));
   const colPrecioSinIgv = headers.findIndex(h => h.includes("PRECIO SIN IGV") || h.includes("PRECIO_SIN_IGV"));
+  const colFormaPago = headers.findIndex(h => h.includes("FORMA DE PAGO") || h.includes("FORMA_PAGO") || h === "PAGO");
+  const colComprobantePago = headers.findIndex(h => h.includes("COMPROBANTE DE PAGO") || h.includes("COMPROBANTE_PAGO") || h.includes("COMPROBANTE"));
   const colObs = headers.findIndex(h => h.includes("OBSERVACIÓN") || h.includes("OBSERVACION"));
   const colReqId = headers.indexOf("REQUEST_ID");
 
@@ -681,6 +746,8 @@ function getRecentMovements(limit) {
       precioVenta: (colPrecioVenta !== -1 && row[colPrecioVenta] !== "" && !isNaN(Number(row[colPrecioVenta]))) ? Number(row[colPrecioVenta]) : null,
       tipoVenta: (colTipoVenta !== -1 && row[colTipoVenta] !== "") ? String(row[colTipoVenta]) : "",
       precioSinIgv: (colPrecioSinIgv !== -1 && row[colPrecioSinIgv] !== "" && !isNaN(Number(row[colPrecioSinIgv]))) ? Number(row[colPrecioSinIgv]) : null,
+      formaPago: (colFormaPago !== -1 && row[colFormaPago] !== "") ? String(row[colFormaPago]) : "",
+      comprobantePago: (colComprobantePago !== -1 && row[colComprobantePago] !== "") ? String(row[colComprobantePago]) : "",
       observacion: colObs !== -1 ? String(row[colObs] || "") : "",
       requestId: colReqId !== -1 ? String(row[colReqId] || "") : ""
     });
@@ -752,7 +819,8 @@ function setupSheet() {
     sheetMov = ss.insertSheet(SHEETS.MOVEMENTS);
   }
   sheetMov.clear();
-  sheetMov.appendRow(["FECHA_HORA", "USUARIO", "TIPO", "CÓDIGO", "CANTIDAD", "OBSERVACIÓN"]);
+  sheetMov.appendRow(["FECHA", "USUARIO", "TIPO", "CÓDIGO", "CANTIDAD", "PRECIO DE VENTA", "TIPO DE VENTA", "PRECIO SIN IGV", "FORMA DE PAGO", "COMPROBANTE DE PAGO", "OBSERVACIÓN", "REQUEST_ID"]);
+  formatHeader(sheetMov, 12);
   
   const sampleMovs = [
     ["2026-11-08 09:30:00", "admin", "ENTRADA", "CAM-001-M", 20, "Llegada lote confección taller"],
