@@ -444,12 +444,22 @@ function showMainApp() {
   switchTab("dashboard");
 }
 
+/**
+ * Formatea el nombre de usuario para que siempre inicie con mayúscula (ej: "mati" -> "Mati")
+ */
+function formatUserName(name) {
+  if (!name) return "";
+  const str = String(name).trim();
+  if (!str) return "";
+  return str.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
 function updateUserHeader() {
   const user = AppState.user;
   const userNameEl = document.getElementById("header-user-name");
   const userRoleEl = document.getElementById("header-user-role");
   if (user) {
-    if (userNameEl) userNameEl.textContent = user.usuario || "";
+    if (userNameEl) userNameEl.textContent = formatUserName(user.usuario) || "Usuario";
     if (userRoleEl) userRoleEl.textContent = (user.rol || "Usuario").toUpperCase();
   }
 }
@@ -595,7 +605,7 @@ async function handleLoginSubmit(e) {
 
     if (result.success && result.user) {
       AppState.user = result.user;
-      showToast(result.message || `¡Bienvenido, ${result.user.usuario}!`, "success");
+      showToast(result.message || `¡Bienvenido, ${formatUserName(result.user.usuario)}!`, "success");
       showMainApp();
       await loadAppData();
     } else {
@@ -1917,10 +1927,11 @@ function renderSettingsView() {
   const profileRoleBadge = document.getElementById("profile-role-badge");
 
   if (user) {
-    const username = user.usuario || "Usuario";
-    if (profileInitial) profileInitial.textContent = username.charAt(0).toUpperCase();
-    if (profileName) profileName.textContent = username;
-    if (profileUser) profileUser.textContent = `@${username}`;
+    const formattedName = formatUserName(user.usuario) || "Usuario";
+    const rawUser = String(user.usuario || "usuario").toLowerCase();
+    if (profileInitial) profileInitial.textContent = formattedName.charAt(0).toUpperCase();
+    if (profileName) profileName.textContent = formattedName;
+    if (profileUser) profileUser.textContent = `@${rawUser}`;
     if (profileRoleBadge) {
       profileRoleBadge.textContent = `Rol: ${user.rol || 'Usuario'}`;
       if (isUserAdmin) {
