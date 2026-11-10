@@ -2223,18 +2223,15 @@ function renderStatsDashboard() {
   });
 
   let totalVentasPeriodo = 0;
+  let totalProductosVendidos = 0;
   periodSales.forEach(m => {
     totalVentasPeriodo += (parseFloat(m.precioVenta) || 0);
+    totalProductosVendidos += (parseInt(m.cantidad, 10) || 0);
   });
 
   // Ticket Promedio (Promedio por transacción en el período seleccionado)
   const txPeriodoCount = periodSales.length;
   const ticketPromedio = txPeriodoCount > 0 ? (totalVentasPeriodo / txPeriodoCount) : 0;
-
-  // Alertas de Stock (Total de modelos y tallas con stock <= 5 o agotados)
-  const productGroups = groupStockByProduct(stock);
-  const criticalProductsCount = productGroups.filter(g => g.isCritical).length;
-  const criticalItemsCount = stock.filter(item => (Number(item.stockDisponible) || 0) <= 5).length;
 
   // Actualizar Tarjetas de Resumen (KPIs)
   const statVentasLabel = document.getElementById("stat-ventas-label");
@@ -2247,15 +2244,15 @@ function renderStatsDashboard() {
 
   if (statVentasVal) {
     if (period === "HOY") {
-      if (statVentasLabel) statVentasLabel.textContent = "Ventas del Día";
+      if (statVentasLabel) statVentasLabel.innerHTML = "Ventas<br>del Día";
       statVentasVal.textContent = `S/ ${ventasHoy.toFixed(2)}`;
       if (statVentasHint) statVentasHint.textContent = `${txHoyCount} venta${txHoyCount === 1 ? '' : 's'} hoy`;
     } else if (period === "MES") {
-      if (statVentasLabel) statVentasLabel.textContent = "Ventas del Mes";
+      if (statVentasLabel) statVentasLabel.innerHTML = "Ventas<br>del Mes";
       statVentasVal.textContent = `S/ ${totalVentasPeriodo.toFixed(2)}`;
       if (statVentasHint) statVentasHint.textContent = `Hoy: S/ ${ventasHoy.toFixed(2)} (${txPeriodoCount} en mes)`;
     } else if (period === "ANIO") {
-      if (statVentasLabel) statVentasLabel.textContent = "Ventas del Año";
+      if (statVentasLabel) statVentasLabel.innerHTML = "Ventas<br>del Año";
       statVentasVal.textContent = `S/ ${totalVentasPeriodo.toFixed(2)}`;
       if (statVentasHint) statVentasHint.textContent = `Hoy: S/ ${ventasHoy.toFixed(2)} (${txPeriodoCount} en año)`;
     }
@@ -2271,10 +2268,18 @@ function renderStatsDashboard() {
   }
 
   if (statAlertasVal) {
-    statAlertasVal.textContent = criticalProductsCount;
+    statAlertasVal.textContent = totalProductosVendidos;
   }
   if (statAlertasHint) {
-    statAlertasHint.textContent = `${criticalItemsCount} tallas en alerta`;
+    if (period === "HOY") {
+      statAlertasHint.textContent = `${totalProductosVendidos} unid. vendidas hoy`;
+    } else if (period === "MES") {
+      statAlertasHint.textContent = `${totalProductosVendidos} unid. en este mes`;
+    } else if (period === "ANIO") {
+      statAlertasHint.textContent = `${totalProductosVendidos} unid. en este año`;
+    } else {
+      statAlertasHint.textContent = `${totalProductosVendidos} unid. en período`;
+    }
   }
 
   // 3. Renderizar Gráfico Estadístico de Ventas (SVG Ligero)
