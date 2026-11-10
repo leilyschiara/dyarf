@@ -1432,6 +1432,7 @@ body {
 .critical-item-right {
   display: flex;
   align-items: center;
+  flex-direction: column;
   gap: 12px;
   flex-shrink: 0;
 }
@@ -1961,12 +1962,6 @@ body {
 
 .option-buttons-grid.cols-3 {
   grid-template-columns: repeat(3, 1fr);
-}
-
-@media (max-width: 420px) {
-  .option-buttons-grid.cols-3 {
-    grid-template-columns: 1fr;
-  }
 }
 
 
