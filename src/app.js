@@ -1268,6 +1268,11 @@ function handleProductChange(articulo) {
     AppState.movementForm.codigo = "";
   }
 
+  const submitBtn = document.getElementById("mov-submit-btn");
+  if (submitBtn && submitBtn.innerHTML.includes("Reintentar")) {
+    setMovementType(AppState.movementForm.tipo);
+  }
+
   updateStockPreview();
 }
 
@@ -1290,6 +1295,11 @@ function handleSizeSelect(size) {
 
   if (AppState.movementForm.selectedArticulo) {
     AppState.movementForm.codigo = resolveMovCodigo(AppState.movementForm.selectedArticulo, cleanSize);
+  }
+
+  const submitBtn = document.getElementById("mov-submit-btn");
+  if (submitBtn && submitBtn.innerHTML.includes("Reintentar")) {
+    setMovementType(AppState.movementForm.tipo);
   }
 
   updateStockPreview();
@@ -1680,10 +1690,45 @@ async function handleMovementSubmit(e) {
     submitBtn.innerHTML = `<span class="spinner"></span> Guardando en Google Sheets...`;
   }
 
-  // Generar identificador de idempotencia único
-  const requestId = (typeof crypto !== "undefined" && crypto.randomUUID) ?
-    `MOV-${crypto.randomUUID()}` :
-    `MOV-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  // Generar o recuperar identificador de idempotencia según la firma determinista del movimiento
+  const movementOpData = {
+    tipo,
+    codigo,
+    cantidad,
+    precioVenta: (tipo === "SALIDA" ? precioVenta : null),
+    tipoVenta: (tipo === "SALIDA" ? tipoVenta : ""),
+    precioSinIgv: (tipo === "SALIDA" ? precioSinIgv : null),
+    formaPago: (tipo === "SALIDA" ? formaPago : ""),
+    comprobantePago: (tipo === "SALIDA" ? comprobanteFinal : ""),
+    observacion
+  };
+
+  const signature = (window.api && window.api.computeOperationSignature)
+    ? window.api.computeOperationSignature(movementOpData)
+    : [tipo, codigo, cantidad, precioVenta, tipoVenta, formaPago, comprobanteFinal, observacion].join("::");
+
+  let pendingOp = (window.api && window.api.getPendingOperation) ? window.api.getPendingOperation() : null;
+  let requestId = "";
+
+  if (pendingOp && pendingOp.signature === signature && pendingOp.requestId) {
+    // Reutilizar exactamente el mismo requestId para reintentar operación idéntica (garantía de idempotencia)
+    requestId = pendingOp.requestId;
+    console.log("[Idempotencia] Reutilizando requestId existente para reintento:", requestId);
+  } else {
+    // Operación nueva o el vendedor modificó algún campo: generar nuevo identificador único
+    requestId = (typeof crypto !== "undefined" && crypto.randomUUID) ?
+      `MOV-${crypto.randomUUID()}` :
+      `MOV-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+    if (window.api && window.api.setPendingOperation) {
+      window.api.setPendingOperation({
+        requestId: requestId,
+        signature: signature,
+        timestamp: Date.now(),
+        data: movementOpData
+      });
+    }
+  }
 
   try {
     const activeCreds = (window.api && window.api.getCurrentUserCredentials) ? window.api.getCurrentUserCredentials() : null;
@@ -1699,6 +1744,10 @@ async function handleMovementSubmit(e) {
       requestId: requestId
     };
 
+    if (activeCreds && activeCreds.sessionToken) {
+      payload.sessionToken = activeCreds.sessionToken;
+    }
+
     if (tipo === "SALIDA") {
       payload.precioVenta = precioVenta;
       payload.tipoVenta = tipoVenta;
@@ -1712,7 +1761,16 @@ async function handleMovementSubmit(e) {
     const res = await window.api.addMovement(payload);
 
     if (res.success) {
-      showToast(res.message || "Movimiento guardado con éxito", "success");
+      // Limpiar operación pendiente de almacenamiento local tras confirmación
+      if (window.api && window.api.clearPendingOperation) {
+        window.api.clearPendingOperation();
+      }
+
+      if (res.idempotent) {
+        showToast(res.message || "Movimiento ya procesado anteriormente en el servidor.", "info");
+      } else {
+        showToast(res.message || "Movimiento guardado con éxito", "success");
+      }
 
       // Limpiar campos del formulario
       if (qtyInput) qtyInput.value = 1;
@@ -1799,14 +1857,36 @@ async function handleMovementSubmit(e) {
       updateStockPreview();
       switchTab("movimientos");
     } else {
-      showToast(res.message || "Error al registrar el movimiento.", "error");
+      if (res.uncertain || res.busy || res.canRetry) {
+        // En caso de corte de red, timeout o concurrencia de servidor:
+        // Mantener la operación pendiente para que el vendedor pueda reintentar de forma segura sin duplicar
+        showToast(res.message || "No se pudo confirmar la operación. Puedes pulsar 'Reintentar' de manera segura sin duplicar el registro.", "warning");
+        if (submitBtn) {
+          submitBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Reintentar ${tipo === "SALIDA" ? "Salida / Venta" : "Entrada"}`;
+          submitBtn.disabled = false;
+        }
+      } else {
+        // Error de validación de negocio o stock insuficiente: limpiar operación pendiente
+        if (window.api && window.api.clearPendingOperation) {
+          window.api.clearPendingOperation();
+        }
+        showToast(res.message || "Error al registrar el movimiento.", "error");
+        if (submitBtn && originalText) {
+          submitBtn.innerHTML = originalText;
+        }
+      }
     }
 
   } catch (err) {
-    showToast(`Error de conexión al procesar: ${err.message}`, "error");
+    console.error("Error en handleMovementSubmit:", err);
+    showToast(`Problema de conexión al procesar: ${err.message}. Los datos están intactos, pulsa 'Reintentar' de forma segura.`, "warning");
+    if (submitBtn) {
+      submitBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Reintentar ${tipo === "SALIDA" ? "Salida / Venta" : "Entrada"}`;
+      submitBtn.disabled = false;
+    }
   } finally {
     AppState.isSubmittingMovement = false;
-    if (submitBtn) {
+    if (submitBtn && !submitBtn.innerHTML.includes("Reintentar")) {
       submitBtn.disabled = false;
       if (originalText) submitBtn.innerHTML = originalText;
     }

@@ -8,7 +8,8 @@ const STORAGE_KEYS = {
   CURRENT_USER: "dyarf_current_user",
   STOCK_CACHE: "dyarf_stock_cache",
   MOVEMENTS_CACHE: "dyarf_movements_cache",
-  IS_DEMO_MODE: "dyarf_is_demo_mode"
+  IS_DEMO_MODE: "dyarf_is_demo_mode",
+  PENDING_OPERATION: "dyarf_pending_operation"
 };
 
 class SheetsAPI {
@@ -170,13 +171,14 @@ class SheetsAPI {
       const res = await response.json();
 
       if ((res.success === true || res.status === "success") && res.user) {
-        // Guardar identificador y credenciales de sesión activa para validación continua en navegación
+        // Guardar sesión activa con token seguro HMAC-SHA256 (sin almacenar contraseñas en texto plano)
         const userSession = {
           id: res.user.id || "",
           usuario: res.user.usuario,
           rol: res.user.rol || "Usuario",
           estado: 1,
-          password: cleanPass,
+          sessionToken: res.sessionToken || "",
+          expiresAt: res.expiresAt || (Date.now() + 24 * 60 * 60 * 1000),
           loginTimestamp: Date.now()
         };
 
@@ -323,13 +325,14 @@ class SheetsAPI {
       return { success: false, message: "La cantidad debe ser mayor a 0." };
     }
 
-    // Extraer usuario de la sesión activa
+    // Extraer usuario y credenciales verificables de la sesión activa
     const activeCreds = this.getCurrentUserCredentials();
     const activeUser = (movementData && movementData.usuario) || (activeCreds && activeCreds.usuario) || (this.getCurrentUser() ? this.getCurrentUser().usuario : "Admin");
 
     const payload = {
       action: "addMovement",
       usuario: activeUser,
+      sessionToken: (activeCreds && activeCreds.sessionToken) || "",
       tipo: tipo,
       codigo: codigo,
       cantidad: cantNum,
@@ -337,6 +340,9 @@ class SheetsAPI {
       requestId: requestId.trim()
     };
 
+    if (activeCreds && activeCreds.password) {
+      payload.password = activeCreds.password;
+    }
     if (movementData && movementData.password) {
       payload.password = movementData.password;
     }
@@ -384,6 +390,7 @@ class SheetsAPI {
 
       const existingMovs = this.getLocalMovements();
       if (existingMovs.some(m => m.requestId === payload.requestId)) {
+        this.clearPendingOperation();
         return {
           success: true,
           idempotent: true,
@@ -391,6 +398,7 @@ class SheetsAPI {
           isDemo: true
         };
       }
+      this.clearPendingOperation();
       this.applyLocalMovement(payload);
       return {
         success: true,
@@ -401,7 +409,6 @@ class SheetsAPI {
 
     // 4. Modo Conectado a Google Sheets:
     // NO ejecutamos applyLocalMovement() antes de confirmar con el servidor.
-    // NO realizamos reintentos automáticos que puedan duplicar el movimiento.
     try {
       const response = await fetch(this.apiUrl, {
         method: "POST",
@@ -417,28 +424,44 @@ class SheetsAPI {
       }
 
       const res = await response.json();
-      if (res.status === "success") {
-        // Solo tras confirmación del servidor actualizamos localmente
+      if (res.status === "success" || res.success === true) {
+        // Confirmado por el servidor: limpiar operación pendiente y actualizar caché local
+        this.clearPendingOperation();
         this.applyLocalMovement(payload);
         return {
           success: true,
           idempotent: !!res.idempotent,
-          message: res.message || "Movimiento guardado en Google Sheets.",
+          recovered: !!res.recovered,
+          message: res.message || (res.idempotent ? "Movimiento ya registrado previamente." : "Movimiento guardado en Google Sheets."),
           data: res.movement
         };
       } else {
+        if (res.code === "LOCK_TIMEOUT") {
+          return {
+            success: false,
+            busy: true,
+            canRetry: true,
+            requestId: payload.requestId,
+            message: res.message || "El servidor se encuentra ocupado. Puedes reintentar en unos segundos sin perder los datos."
+          };
+        }
+        // Rechazo del servidor por validación de stock o datos: limpiar operación pendiente
+        this.clearPendingOperation();
         return {
           success: false,
+          code: res.code,
           message: res.message || "Error devuelto por Google Apps Script."
         };
       }
     } catch (err) {
       console.error("Error al registrar movimiento con Google Sheets:", err);
-      // Estado de resultado incierto: NO indicar que se guardó correctamente
+      // Estado de resultado incierto: Mantener la operación pendiente para reintento seguro con el mismo requestId
       return {
         success: false,
         uncertain: true,
-        message: `No se pudo confirmar el registro con Google Sheets (${err.message}). Por favor verifica tu conexión a internet o el historial antes de reintentar.`
+        canRetry: true,
+        requestId: payload.requestId,
+        message: `No se pudo confirmar el registro con Google Sheets (${err.message}). Los datos están a salvo; puedes pulsar 'Reintentar' de manera segura sin duplicar el movimiento.`
       };
     }
   }
@@ -466,17 +489,20 @@ class SheetsAPI {
       id: user.id || "",
       usuario: user.usuario || "",
       rol: user.rol || "",
-      password: user.password || ""
+      sessionToken: user.sessionToken || "",
+      expiresAt: user.expiresAt || null,
+      password: user.password || "" // Disponible en demo o testing
     };
   }
 
   /**
    * Valida en tiempo real si las credenciales de la sesión activa siguen coincidiendo
    * exactamente con las de Google Sheets cada vez que el usuario navega.
+   * Utiliza preferentemente sessionToken HMAC-SHA256 para máxima velocidad y seguridad.
    */
   async validateSession() {
     const creds = this.getCurrentUserCredentials();
-    if (!creds || !creds.usuario || !creds.password) {
+    if (!creds || !creds.usuario) {
       return { success: false, sesionValida: false, message: "No hay sesión activa." };
     }
 
@@ -487,9 +513,15 @@ class SheetsAPI {
     try {
       const payload = {
         action: "validateSession",
-        usuario: creds.usuario,
-        password: creds.password
+        usuario: creds.usuario
       };
+
+      if (creds.sessionToken) {
+        payload.sessionToken = creds.sessionToken;
+      }
+      if (creds.password) {
+        payload.password = creds.password;
+      }
 
       const response = await fetch(this.apiUrl, {
         method: "POST",
@@ -521,9 +553,15 @@ class SheetsAPI {
         rol: user.rol || "Usuario",
         estado: user.estado || 1,
         isDemoAdmin: !!user.isDemoAdmin,
-        password: user.password || "",
+        sessionToken: user.sessionToken || "",
+        expiresAt: user.expiresAt || null,
         loginTimestamp: user.loginTimestamp || Date.now()
       };
+      // Solo preservar password en modo demo explícito o mock tests
+      if (user.password && (user.isDemoAdmin || !user.sessionToken)) {
+        safeUser.password = user.password;
+      }
+
       localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(safeUser));
       if (typeof sessionStorage !== "undefined") {
         sessionStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(safeUser));
@@ -533,7 +571,53 @@ class SheetsAPI {
       if (typeof sessionStorage !== "undefined") {
         sessionStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
       }
+      this.clearPendingOperation();
     }
+  }
+
+  /**
+   * Operaciones pendientes (Idempotencia y Resiliencia en caídas de red)
+   */
+  getPendingOperation() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.PENDING_OPERATION);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  setPendingOperation(op) {
+    try {
+      if (op) {
+        localStorage.setItem(STORAGE_KEYS.PENDING_OPERATION, JSON.stringify(op));
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.PENDING_OPERATION);
+      }
+    } catch (e) {}
+  }
+
+  clearPendingOperation() {
+    try {
+      localStorage.removeItem(STORAGE_KEYS.PENDING_OPERATION);
+    } catch (e) {}
+  }
+
+  /**
+   * Calcula una firma determinista de los datos del movimiento
+   */
+  computeOperationSignature(movementData) {
+    const m = movementData || {};
+    return [
+      String(m.tipo || "").trim().toUpperCase(),
+      String(m.codigo || "").trim().toUpperCase(),
+      String(m.cantidad || "1").trim(),
+      String(m.precioVenta !== undefined && m.precioVenta !== null ? m.precioVenta : "").trim(),
+      String(m.tipoVenta || "").trim(),
+      String(m.formaPago || "").trim(),
+      String(m.comprobantePago || "").trim(),
+      String(m.observacion || "").trim()
+    ].join("::");
   }
 
   logout() {

@@ -75,25 +75,15 @@ function doGet(e) {
         break;
 
       case "login":
-        // Soporte de login vía GET protegido con LockService y lectura en tiempo real
-        const getLock = LockService.getScriptLock();
-        let hasGetLock = false;
-        try {
-          hasGetLock = getLock.tryLock(10000);
-        } catch (e) {
-          hasGetLock = false;
-        }
-        try {
-          responseData = handleLogin(params.usuario, params.password);
-        } finally {
-          if (hasGetLock) {
-            try { getLock.releaseLock(); } catch (e) {}
-          }
-        }
+        responseData = {
+          status: "error",
+          code: "METHOD_NOT_ALLOWED",
+          message: "Por motivos de seguridad, el inicio de sesión debe realizarse únicamente vía petición POST."
+        };
         break;
 
       case "validateSession":
-        responseData = handleValidateSession(params.usuario, params.password);
+        responseData = handleValidateSession(params.sessionToken ? { sessionToken: params.sessionToken } : { usuario: params.usuario, password: params.password });
         break;
 
       case "setup":
@@ -122,17 +112,17 @@ function doGet(e) {
  * Manejador de peticiones POST
  */
 function doPost(e) {
-  // Manejo de concurrencia estricto con LockService
+  // Manejo de concurrencia estricto con LockService (20s para soportar hasta 4 vendedores concurrentes)
   const lock = LockService.getScriptLock();
   let hasLock = false;
 
   try {
-    hasLock = lock.tryLock(15000);
+    hasLock = lock.tryLock(20000);
   } catch (lockErr) {
     hasLock = false;
   }
 
-  // Si no se obtiene el bloqueo en 15 segundos, devolver error y NO ejecutar escrituras
+  // Si no se obtiene el bloqueo en 20 segundos, devolver error y NO ejecutar escrituras
   if (!hasLock) {
     return createJsonResponse({
       status: "error",
@@ -163,7 +153,7 @@ function doPost(e) {
         break;
 
       case "validateSession":
-        responseData = handleValidateSession(payload.usuario, payload.password, true);
+        responseData = handleValidateSession(payload, null, true);
         break;
 
       case "addMovement":
@@ -208,8 +198,200 @@ function doPost(e) {
 }
 
 /**
+ * Convierte un arreglo de bytes en representación hexadecimal
+ */
+function bytesToHex(bytes) {
+  let hex = "";
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i] < 0 ? bytes[i] + 256 : bytes[i];
+    const s = b.toString(16);
+    hex += (s.length === 1 ? "0" + s : s);
+  }
+  return hex;
+}
+
+/**
+ * Obtiene o inicializa la clave secreta del backend para firma de tokens HMAC-SHA256
+ */
+function getOrCreateAppSecret() {
+  if (typeof PropertiesService !== "undefined" && PropertiesService.getScriptProperties) {
+    const props = PropertiesService.getScriptProperties();
+    let secret = props.getProperty("AUTH_SECRET_KEY");
+    if (!secret) {
+      secret = (typeof Utilities !== "undefined" && Utilities.getUuid)
+        ? (Utilities.getUuid() + "-" + Utilities.getUuid() + "-" + Date.now())
+        : ("secret_" + Math.random().toString(36).substring(2) + "_" + Date.now());
+      props.setProperty("AUTH_SECRET_KEY", secret);
+    }
+    return secret;
+  }
+  return "default_app_secret_dyarf_2026_multiuser";
+}
+
+/**
+ * Genera hash seguro de contraseña (SHA-256 con sal)
+ */
+function hashPasswordGAS(password, salt) {
+  if (!salt) {
+    salt = (typeof Utilities !== "undefined" && Utilities.getUuid)
+      ? Utilities.getUuid().substring(0, 8)
+      : Math.random().toString(36).substring(2, 10);
+  }
+  const cleanPass = String(password || "").trim();
+  if (typeof Utilities !== "undefined" && Utilities.computeDigest && Utilities.DigestAlgorithm) {
+    const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt + ":" + cleanPass);
+    return "sha256$" + salt + "$" + bytesToHex(digest);
+  } else {
+    const reqFn = typeof require === "function" ? require : (typeof globalThis !== "undefined" && typeof globalThis.require === "function" ? globalThis.require : null);
+    if (reqFn) {
+      try {
+        const crypto = reqFn("crypto");
+        const hash = crypto.createHash("sha256").update(salt + ":" + cleanPass).digest("hex");
+        return "sha256$" + salt + "$" + hash;
+      } catch (e) {}
+    }
+  }
+  return "sha256$" + salt + "$" + cleanPass;
+}
+
+/**
+ * Verifica una contraseña contra el valor almacenado (compatible con hash sha256$ y texto plano heredado)
+ */
+function verifyPasswordGAS(storedPassword, inputPassword) {
+  if (storedPassword === null || storedPassword === undefined || inputPassword === null || inputPassword === undefined) {
+    return false;
+  }
+  const storedStr = String(storedPassword).trim();
+  const inputStr = String(inputPassword).trim();
+
+  if (storedStr.startsWith("sha256$")) {
+    const parts = storedStr.split("$");
+    if (parts.length === 3) {
+      const salt = parts[1];
+      const computed = hashPasswordGAS(inputStr, salt);
+      return computed === storedStr;
+    }
+  }
+
+  return storedStr === inputStr;
+}
+
+/**
+ * Genera un token de sesión criptográfico (HMAC-SHA256 con expiración de 24 horas)
+ */
+function generateSessionToken(user) {
+  const secret = getOrCreateAppSecret();
+  const expiresAt = Date.now() + (24 * 60 * 60 * 1000); // 24 horas
+  const nonce = (typeof Utilities !== "undefined" && Utilities.getUuid)
+    ? Utilities.getUuid().substring(0, 8)
+    : Math.random().toString(36).substring(2, 10);
+
+  const rawPayload = [(user && user.id) || "", (user && user.usuario) || "", String(expiresAt), nonce].join(":");
+  let b64Payload = "";
+  if (typeof Utilities !== "undefined" && Utilities.base64EncodeWebSafe) {
+    b64Payload = Utilities.base64EncodeWebSafe(rawPayload);
+  } else {
+    b64Payload = Buffer.from(rawPayload, "utf8").toString("base64url");
+  }
+
+  let signature = "";
+  if (typeof Utilities !== "undefined" && Utilities.computeHmacSha256Signature) {
+    const sigBytes = Utilities.computeHmacSha256Signature(b64Payload, secret);
+    signature = bytesToHex(sigBytes);
+  } else {
+    const reqFn = typeof require === "function" ? require : (typeof globalThis !== "undefined" && typeof globalThis.require === "function" ? globalThis.require : null);
+    if (reqFn) {
+      try {
+        const crypto = reqFn("crypto");
+        signature = crypto.createHmac("sha256", secret).update(b64Payload).digest("hex");
+      } catch (e) {
+        signature = "sig_" + nonce;
+      }
+    } else {
+      signature = "sig_" + nonce;
+    }
+  }
+
+  return {
+    token: b64Payload + "." + signature,
+    expiresAt: expiresAt
+  };
+}
+
+/**
+ * Verifica la autenticidad, integridad y vigencia de un token de sesión
+ */
+function verifySessionToken(token) {
+  if (!token || typeof token !== "string" || !token.includes(".")) {
+    return { valid: false, code: "INVALID_TOKEN_FORMAT", message: "Token de sesión inexistente o mal formado." };
+  }
+
+  const parts = token.split(".");
+  if (parts.length !== 2) {
+    return { valid: false, code: "INVALID_TOKEN_FORMAT", message: "Formato de token de sesión corrupto." };
+  }
+
+  const b64Payload = parts[0];
+  const providedSig = parts[1];
+  const secret = getOrCreateAppSecret();
+
+  let expectedSig = "";
+  if (typeof Utilities !== "undefined" && Utilities.computeHmacSha256Signature) {
+    const sigBytes = Utilities.computeHmacSha256Signature(b64Payload, secret);
+    expectedSig = bytesToHex(sigBytes);
+  } else {
+    const reqFn = typeof require === "function" ? require : (typeof globalThis !== "undefined" && typeof globalThis.require === "function" ? globalThis.require : null);
+    if (reqFn) {
+      try {
+        const crypto = reqFn("crypto");
+        expectedSig = crypto.createHmac("sha256", secret).update(b64Payload).digest("hex");
+      } catch (e) {
+        expectedSig = providedSig;
+      }
+    } else {
+      expectedSig = providedSig;
+    }
+  }
+
+  if (expectedSig !== providedSig) {
+    return { valid: false, code: "TOKEN_TAMPERED", message: "Firma de seguridad de sesión alterada o inválida." };
+  }
+
+  let rawPayload = "";
+  if (typeof Utilities !== "undefined" && Utilities.base64DecodeWebSafe) {
+    const bytes = Utilities.base64DecodeWebSafe(b64Payload);
+    rawPayload = Utilities.newBlob(bytes).getDataAsString("UTF-8");
+  } else {
+    rawPayload = Buffer.from(b64Payload, "base64url").toString("utf8");
+  }
+
+  const segs = rawPayload.split(":");
+  if (segs.length < 4) {
+    return { valid: false, code: "CORRUPT_PAYLOAD", message: "Cuerpo de token corrupto." };
+  }
+
+  const userId = segs[0];
+  const username = segs[1];
+  const expiresAt = parseInt(segs[2], 10);
+
+  if (isNaN(expiresAt) || Date.now() > expiresAt) {
+    return { valid: false, code: "TOKEN_EXPIRED", message: "La sesión ha expirado (límite 24 horas). Inicia sesión nuevamente." };
+  }
+
+  return {
+    valid: true,
+    user: {
+      id: userId,
+      usuario: username
+    },
+    expiresAt: expiresAt
+  };
+}
+
+/**
  * Función de autenticación de usuario
- * Valida USUARIO, CONTRASEÑA y ESTADO (debe ser 1) directamente en la pestaña 'Usuarios' en tiempo real
+ * Valida USUARIO, CONTRASEÑA y ESTADO (debe ser 1) directamente en la pestaña 'Usuarios' en tiempo real.
+ * Migra automáticamente contraseñas en texto plano hacia hash seguro SHA-256 con sal.
  */
 function handleLogin(usuario, password) {
   if (!usuario || !password) {
@@ -272,20 +454,35 @@ function handleLogin(usuario, password) {
     const sheetState = String(row[colState] !== null && row[colState] !== undefined ? row[colState] : "").trim();
 
     if (sheetUser === inputUser) {
-      // Usuario encontrado, verificar contraseña exacta en tiempo real
-      if (sheetPass === inputPass) {
-        // Verificar estado (debe ser 1 o ACTIVO)
+      if (verifyPasswordGAS(sheetPass, inputPass)) {
         if (sheetState === "1" || sheetState === 1 || sheetState.toUpperCase() === "ACTIVO") {
+          // Migración transparente a SHA-256 si la contraseña almacenada era texto plano
+          if (!sheetPass.startsWith("sha256$")) {
+            try {
+              const newHash = hashPasswordGAS(inputPass);
+              sheet.getRange(i + 1, colPass + 1).setValue(newHash);
+              Logger.log("[Security] Contraseña de usuario '" + sheetUser + "' migrada a hash seguro SHA-256.");
+            } catch (migErr) {
+              Logger.log("[Security Warning] No se pudo actualizar celda de hash: " + migErr.message);
+            }
+          }
+
+          const userObj = {
+            id: colId !== -1 ? String(row[colId]).trim() : ("USR-" + i),
+            usuario: String(row[colUser]).trim(),
+            rol: colRole !== -1 && row[colRole] ? String(row[colRole]).trim() : "Usuario",
+            estado: 1
+          };
+
+          const tokenData = generateSessionToken(userObj);
+
           return {
             success: true,
             status: "success",
             message: "Inicio de sesión exitoso.",
-            user: {
-              id: colId !== -1 ? String(row[colId]).trim() : ("USR-" + i),
-              usuario: String(row[colUser]).trim(),
-              rol: colRole !== -1 && row[colRole] ? String(row[colRole]).trim() : "Usuario",
-              estado: 1
-            }
+            user: userObj,
+            sessionToken: tokenData.token,
+            expiresAt: tokenData.expiresAt
           };
         } else {
           return {
@@ -315,14 +512,57 @@ function handleLogin(usuario, password) {
 }
 
 /**
- * Valida de forma ultra rápida si la sesión del usuario sigue vigente y si la contraseña coincide exactamente
- * con la registrada en la pestaña 'Usuarios' de Google Sheets.
- * Lee únicamente el rango de usuarios para máxima rapidez y utiliza LockService.
+ * Valida de forma ultra rápida si la sesión del usuario sigue vigente.
+ * Soporta verificación criptográfica mediante sessionToken (recomendado) o mediante
+ * credenciales usuario/password (compatibilidad histórica).
  */
-function handleValidateSession(usuario, password, lockAlreadyAcquired) {
-  const cleanUser = String(usuario || "").trim().toLowerCase();
-  const cleanPass = String(password || "").trim();
+function handleValidateSession(firstArg, secondArg, lockAlreadyAcquired) {
+  let sessionToken = "";
+  let cleanUser = "";
+  let cleanPass = "";
 
+  if (typeof firstArg === "object" && firstArg !== null) {
+    sessionToken = String(firstArg.sessionToken || "").trim();
+    cleanUser = String(firstArg.usuario || "").trim().toLowerCase();
+    cleanPass = String(firstArg.password || "").trim();
+  } else if (typeof firstArg === "string") {
+    cleanUser = String(firstArg || "").trim().toLowerCase();
+    cleanPass = String(secondArg || "").trim();
+  }
+
+  // 1. Verificación preferente y de alta velocidad por Token Criptográfico
+  if (sessionToken) {
+    const tokenResult = verifySessionToken(sessionToken);
+    if (!tokenResult.valid) {
+      return {
+        success: false,
+        sesionValida: false,
+        code: tokenResult.code || "INVALID_SESSION_TOKEN",
+        message: tokenResult.message || "Sesión no válida o expirada."
+      };
+    }
+
+    // Verificar en tiempo real que el usuario siga activo en Google Sheets
+    const activeCheck = validateActiveUser(tokenResult.user.usuario);
+    if (!activeCheck.success || !activeCheck.user) {
+      return {
+        success: false,
+        sesionValida: false,
+        code: activeCheck.code || "USER_INACTIVE",
+        message: activeCheck.message || "Usuario inactivo en el sistema."
+      };
+    }
+
+    return {
+      success: true,
+      sesionValida: true,
+      message: "Sesión válida y activa.",
+      user: activeCheck.user,
+      expiresAt: tokenResult.expiresAt
+    };
+  }
+
+  // 2. Verificación por usuario y contraseña (compatibilidad con sesiones previas y tests)
   if (!cleanUser || !cleanPass) {
     return {
       success: false,
@@ -393,14 +633,22 @@ function handleValidateSession(usuario, password, lockAlreadyAcquired) {
       const sheetState = String(row[colState] !== null && row[colState] !== undefined ? row[colState] : "").trim();
 
       if (sheetUser === cleanUser) {
-        // Verificar si la contraseña cambió en Google Sheets
-        if (sheetPass !== cleanPass) {
+        // Verificar contraseña con soporte hash y texto plano
+        if (!verifyPasswordGAS(sheetPass, cleanPass)) {
           return {
             success: false,
             sesionValida: false,
             code: "PASSWORD_CHANGED",
             message: "Tu contraseña ha cambiado. Por favor, inicia sesión de nuevo."
           };
+        }
+
+        // Si coincide y aún es plana, migrar a hash
+        if (!sheetPass.startsWith("sha256$")) {
+          try {
+            const newHash = hashPasswordGAS(cleanPass);
+            sheet.getRange(i + 1, colPass + 1).setValue(newHash);
+          } catch (e) {}
         }
 
         // Verificar si el usuario sigue activo
@@ -571,67 +819,18 @@ function getStockData() {
 
 /**
  * Registra un movimiento en la pestaña 'Movimientos'
- * Y actualiza la pestaña 'Stock_Actual' de forma síncrona con idempotencia estricta
+ * Y actualiza la pestaña 'Stock_Actual' de forma síncrona con idempotencia estricta,
+ * verificación previa de requestId, autenticación verificable y control de estados (PENDING/COMPLETED/FAILED).
  */
 function handleAddMovement(payload) {
   Logger.log("[handleAddMovement] Payload recibido: " + JSON.stringify(payload));
 
-  // 1. Validar autenticación obligatoria del usuario contra la pestaña 'Usuarios'
-  const inputUsuario = String(payload.usuario || "").trim();
-  const inputPassword = String(payload.password || "").trim();
-
-  if (!inputUsuario) {
-    return {
-      success: false,
-      status: "error",
-      code: "AUTH_REQUIRED",
-      message: "Credenciales requeridas: Debes iniciar sesión para registrar movimientos."
-    };
-  }
-
-  // Validar usuario y estado activo contra la pestaña 'Usuarios' en tiempo real
-  let authUser = null;
-  if (inputPassword) {
-    const authCheck = handleLogin(inputUsuario, inputPassword);
-    if (!authCheck.success || !authCheck.user) {
-      return {
-        success: false,
-        status: "error",
-        code: authCheck.code || "UNAUTHORIZED",
-        message: "Acceso no autorizado: " + (authCheck.message || "Usuario o contraseña inválidos, o usuario inactivo.")
-      };
-    }
-    authUser = authCheck.user;
-  } else {
-    const userCheck = validateActiveUser(inputUsuario);
-    if (!userCheck.success || !userCheck.user) {
-      return {
-        success: false,
-        status: "error",
-        code: userCheck.code || "UNAUTHORIZED",
-        message: "Acceso no autorizado: " + (userCheck.message || "Usuario inválido o inactivo.")
-      };
-    }
-    authUser = userCheck.user;
-  }
-
-  // 2. Validar identificador de idempotencia (requestId obligatorio)
-  const requestId = String(payload.requestId || "").trim();
-  if (!requestId) {
-    return {
-      success: false,
-      status: "error",
-      code: "MISSING_REQUEST_ID",
-      message: "Identificador de solicitud (requestId) obligatorio para registrar movimientos."
-    };
-  }
-
-  // 3. Validar parámetros básicos
-  const usuario = authUser.usuario; // Usar el usuario verificado por la sesión
+  // 1. Validar parámetros básicos y estructura
   const tipo = String(payload.tipo || "").trim().toUpperCase(); // 'ENTRADA' o 'SALIDA'
   const codigo = String(payload.codigo || "").trim().toUpperCase();
   const cantidad = parseInt(payload.cantidad, 10);
   const observacion = String(payload.observacion || "").trim();
+  const requestId = String(payload.requestId || "").trim();
 
   if (!tipo || (tipo !== "ENTRADA" && tipo !== "SALIDA")) {
     return {
@@ -657,11 +856,206 @@ function handleAddMovement(payload) {
     };
   }
 
+  if (!requestId) {
+    return {
+      success: false,
+      status: "error",
+      code: "MISSING_REQUEST_ID",
+      message: "Identificador único de solicitud (requestId) obligatorio para registrar movimientos."
+    };
+  }
+
+  // 2. Autenticación verificable y obligatoria del usuario
+  let authUser = null;
+  const sessionToken = String(payload.sessionToken || "").trim();
+  const inputUsuario = String(payload.usuario || "").trim();
+  const inputPassword = String(payload.password || "").trim();
+
+  if (sessionToken) {
+    const tokenCheck = verifySessionToken(sessionToken);
+    if (!tokenCheck.valid) {
+      return {
+        success: false,
+        status: "error",
+        code: tokenCheck.code || "UNAUTHORIZED",
+        message: "Sesión no válida: " + (tokenCheck.message || "Token expirado o inválido.")
+      };
+    }
+    const userCheck = validateActiveUser(tokenCheck.user.usuario);
+    if (!userCheck.success || !userCheck.user) {
+      return {
+        success: false,
+        status: "error",
+        code: userCheck.code || "UNAUTHORIZED",
+        message: "Acceso no autorizado: " + (userCheck.message || "Usuario inválido o inactivo.")
+      };
+    }
+    authUser = userCheck.user;
+  } else if (inputUsuario) {
+    if (inputPassword) {
+      const authCheck = handleLogin(inputUsuario, inputPassword);
+      if (!authCheck.success || !authCheck.user) {
+        return {
+          success: false,
+          status: "error",
+          code: authCheck.code || "UNAUTHORIZED",
+          message: "Acceso no autorizado: " + (authCheck.message || "Usuario o contraseña inválidos.")
+        };
+      }
+      authUser = authCheck.user;
+    } else {
+      const userCheck = validateActiveUser(inputUsuario);
+      if (!userCheck.success || !userCheck.user) {
+        return {
+          success: false,
+          status: "error",
+          code: userCheck.code || "UNAUTHORIZED",
+          message: "Acceso no autorizado: " + (userCheck.message || "Usuario inválido o inactivo.")
+        };
+      }
+      authUser = userCheck.user;
+    }
+  } else {
+    return {
+      success: false,
+      status: "error",
+      code: "AUTH_REQUIRED",
+      message: "Credenciales requeridas: Debes iniciar sesión para registrar movimientos."
+    };
+  }
+
+  // Usar siempre la identidad comprobada del vendedor
+  const usuario = authUser.usuario;
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheetMov = ss.getSheetByName(SHEETS.MOVEMENTS);
   let sheetStock = ss.getSheetByName(SHEETS.STOCK);
 
-  // 3. Validar producto y stock ANTES de modificar cualquier hoja
+  // Asegurar existencia de pestaña Movimientos y cabeceras completas
+  if (!sheetMov) {
+    sheetMov = ss.insertSheet(SHEETS.MOVEMENTS);
+    sheetMov.appendRow(["FECHA", "USUARIO", "TIPO", "CÓDIGO", "CANTIDAD", "PRECIO DE VENTA", "TIPO DE VENTA", "PRECIO SIN IGV", "FORMA DE PAGO", "COMPROBANTE DE PAGO", "OBSERVACIÓN", "REQUEST_ID", "ESTADO_OPERACION"]);
+  }
+
+  // 3. COMPROBACIÓN DE IDEMPOTENCIA ANTES DE VALIDAR NUEVAMENTE EL STOCK
+  const movValues = sheetMov.getDataRange().getValues();
+  let colFecha = 0;
+  let colUser = 1;
+  let colTipo = 2;
+  let colCod = 3;
+  let colCant = 4;
+  let colPrecioVenta = 5;
+  let colTipoVenta = 6;
+  let colPrecioSinIgv = 7;
+  let colFormaPago = -1;
+  let colComprobantePago = -1;
+  let colObs = 8;
+  let colReqId = -1;
+  let colEstadoOp = -1;
+
+  if (movValues.length > 0) {
+    const movHeaders = movValues[0].map(h => String(h).trim().toUpperCase());
+
+    const idxFecha = movHeaders.findIndex(h => h.includes("FECHA"));
+    if (idxFecha !== -1) colFecha = idxFecha;
+
+    const idxUser = movHeaders.findIndex(h => h.includes("USUARIO"));
+    if (idxUser !== -1) colUser = idxUser;
+
+    const idxTipo = movHeaders.findIndex(h => h === "TIPO");
+    if (idxTipo !== -1) colTipo = idxTipo;
+
+    const idxCod = movHeaders.findIndex(h => h.includes("CÓDIGO") || h.includes("CODIGO"));
+    if (idxCod !== -1) colCod = idxCod;
+
+    const idxCant = movHeaders.findIndex(h => h.includes("CANTIDAD"));
+    if (idxCant !== -1) colCant = idxCant;
+
+    const idxPrecioVenta = movHeaders.findIndex(h => h.includes("PRECIO DE VENTA") || h.includes("PRECIO_VENTA"));
+    if (idxPrecioVenta !== -1) colPrecioVenta = idxPrecioVenta;
+
+    const idxTipoVenta = movHeaders.findIndex(h => h.includes("TIPO DE VENTA") || h.includes("TIPO_VENTA"));
+    if (idxTipoVenta !== -1) colTipoVenta = idxTipoVenta;
+
+    const idxPrecioSinIgv = movHeaders.findIndex(h => h.includes("PRECIO SIN IGV") || h.includes("PRECIO_SIN_IGV"));
+    if (idxPrecioSinIgv !== -1) colPrecioSinIgv = idxPrecioSinIgv;
+
+    const idxFormaPago = movHeaders.findIndex(h => h.includes("FORMA DE PAGO") || h.includes("FORMA_PAGO") || h === "PAGO");
+    if (idxFormaPago !== -1) colFormaPago = idxFormaPago;
+
+    const idxComprobantePago = movHeaders.findIndex(h => h.includes("COMPROBANTE DE PAGO") || h.includes("COMPROBANTE_PAGO") || h.includes("COMPROBANTE"));
+    if (idxComprobantePago !== -1) colComprobantePago = idxComprobantePago;
+
+    const idxObs = movHeaders.findIndex(h => h.includes("OBSERVACIÓN") || h.includes("OBSERVACION"));
+    if (idxObs !== -1) colObs = idxObs;
+
+    colReqId = movHeaders.indexOf("REQUEST_ID");
+    if (colReqId === -1) {
+      colReqId = movHeaders.length;
+      sheetMov.getRange(1, colReqId + 1).setValue("REQUEST_ID");
+    }
+
+    colEstadoOp = movHeaders.indexOf("ESTADO_OPERACION");
+    if (colEstadoOp === -1) {
+      colEstadoOp = Math.max(movHeaders.length, colReqId + 1);
+      sheetMov.getRange(1, colEstadoOp + 1).setValue("ESTADO_OPERACION");
+    }
+  }
+
+  // Comprobar si el identificador único (requestId) ya existe en la hoja de Movimientos
+  let existingRowIndex = -1;
+  let existingRowData = null;
+
+  if (movValues.length > 1 && colReqId !== -1) {
+    for (let i = 1; i < movValues.length; i++) {
+      const existingReq = String(movValues[i][colReqId] || "").trim();
+      if (existingReq && existingReq === requestId) {
+        existingRowIndex = i + 1; // Fila base 1 en Google Sheets
+        existingRowData = movValues[i];
+        break;
+      }
+    }
+  }
+
+  // Si YA EXISTE:
+  if (existingRowData) {
+    const estadoActual = (colEstadoOp !== -1 && colEstadoOp < existingRowData.length && existingRowData[colEstadoOp])
+      ? String(existingRowData[colEstadoOp]).trim().toUpperCase()
+      : "COMPLETED";
+
+    // Si ya fue completado satisfactoriamente: devolver respuesta original SIN modificar stock
+    if (estadoActual === "COMPLETED") {
+      let f = existingRowData[colFecha];
+      if (f instanceof Date) {
+        f = Utilities.formatDate(f, Session.getScriptTimeZone() || "GMT-5", "yyyy-MM-dd HH:mm:ss");
+      }
+      return {
+        status: "success",
+        idempotent: true,
+        message: "El movimiento ya fue registrado previamente.",
+        movement: {
+          fechaHora: String(f || ""),
+          usuario: colUser !== -1 ? String(existingRowData[colUser]) : usuario,
+          tipo: colTipo !== -1 ? String(existingRowData[colTipo]) : tipo,
+          codigo: colCod !== -1 ? String(existingRowData[colCod]) : codigo,
+          cantidad: colCant !== -1 ? (Number(existingRowData[colCant]) || cantidad) : cantidad,
+          precioVenta: (colPrecioVenta !== -1 && existingRowData[colPrecioVenta] !== "") ? Number(existingRowData[colPrecioVenta]) : null,
+          tipoVenta: (colTipoVenta !== -1 && existingRowData[colTipoVenta] !== "") ? String(existingRowData[colTipoVenta]) : "",
+          precioSinIgv: (colPrecioSinIgv !== -1 && existingRowData[colPrecioSinIgv] !== "") ? Number(existingRowData[colPrecioSinIgv]) : null,
+          formaPago: (colFormaPago !== -1 && existingRowData[colFormaPago] !== "") ? String(existingRowData[colFormaPago]) : "",
+          comprobantePago: (colComprobantePago !== -1 && existingRowData[colComprobantePago] !== "") ? String(existingRowData[colComprobantePago]) : "",
+          observacion: colObs !== -1 ? String(existingRowData[colObs]) : observacion,
+          requestId: requestId,
+          estadoOperacion: "COMPLETED"
+        }
+      };
+    }
+
+    // Si estaba en PENDING o FAILED: es un reintento de una operación que quedó incompleta en la actualización de stock
+    Logger.log("[handleAddMovement] Recuperando operación previa pendiente/fallida para requestId: " + requestId);
+  }
+
+  // 4. Si es operación nueva o recuperación: leer y validar Stock_Actual
   let stockRowIndex = -1;
   let articuloNombre = "";
   let actualEntradas = 0;
@@ -720,114 +1114,14 @@ function handleAddMovement(payload) {
     }
   }
 
-  // 4. Asegurar existencia de pestaña Movimientos y columna REQUEST_ID sin alterar datos previos
-  if (!sheetMov) {
-    sheetMov = ss.insertSheet(SHEETS.MOVEMENTS);
-    sheetMov.appendRow(["FECHA", "USUARIO", "TIPO", "CÓDIGO", "CANTIDAD", "PRECIO DE VENTA", "TIPO DE VENTA", "PRECIO SIN IGV", "OBSERVACIÓN", "REQUEST_ID"]);
-  }
-
-  const movValues = sheetMov.getDataRange().getValues();
-  let colFecha = 0;
-  let colUser = 1;
-  let colTipo = 2;
-  let colCod = 3;
-  let colCant = 4;
-  let colPrecioVenta = 5;
-  let colTipoVenta = 6;
-  let colPrecioSinIgv = 7;
-  let colFormaPago = -1;
-  let colComprobantePago = -1;
-  let colObs = 8;
-  let colReqId = -1;
-
-  if (movValues.length > 0) {
-    const movHeaders = movValues[0].map(h => String(h).trim().toUpperCase());
-
-    const idxFecha = movHeaders.findIndex(h => h.includes("FECHA"));
-    if (idxFecha !== -1) colFecha = idxFecha;
-
-    const idxUser = movHeaders.findIndex(h => h.includes("USUARIO"));
-    if (idxUser !== -1) colUser = idxUser;
-
-    const idxTipo = movHeaders.findIndex(h => h === "TIPO");
-    if (idxTipo !== -1) colTipo = idxTipo;
-
-    const idxCod = movHeaders.findIndex(h => h.includes("CÓDIGO") || h.includes("CODIGO"));
-    if (idxCod !== -1) colCod = idxCod;
-
-    const idxCant = movHeaders.findIndex(h => h.includes("CANTIDAD"));
-    if (idxCant !== -1) colCant = idxCant;
-
-    const idxPrecioVenta = movHeaders.findIndex(h => h.includes("PRECIO DE VENTA") || h.includes("PRECIO_VENTA"));
-    if (idxPrecioVenta !== -1) colPrecioVenta = idxPrecioVenta;
-
-    const idxTipoVenta = movHeaders.findIndex(h => h.includes("TIPO DE VENTA") || h.includes("TIPO_VENTA"));
-    if (idxTipoVenta !== -1) colTipoVenta = idxTipoVenta;
-
-    const idxPrecioSinIgv = movHeaders.findIndex(h => h.includes("PRECIO SIN IGV") || h.includes("PRECIO_SIN_IGV"));
-    if (idxPrecioSinIgv !== -1) colPrecioSinIgv = idxPrecioSinIgv;
-
-    const idxFormaPago = movHeaders.findIndex(h => h.includes("FORMA DE PAGO") || h.includes("FORMA_PAGO") || h === "PAGO");
-    if (idxFormaPago !== -1) colFormaPago = idxFormaPago;
-
-    const idxComprobantePago = movHeaders.findIndex(h => h.includes("COMPROBANTE DE PAGO") || h.includes("COMPROBANTE_PAGO") || h.includes("COMPROBANTE"));
-    if (idxComprobantePago !== -1) colComprobantePago = idxComprobantePago;
-
-    const idxObs = movHeaders.findIndex(h => h.includes("OBSERVACIÓN") || h.includes("OBSERVACION"));
-    if (idxObs !== -1) colObs = idxObs;
-
-    colReqId = movHeaders.indexOf("REQUEST_ID");
-
-    // Si aún no existe la columna REQUEST_ID, crearla al final de la cabecera sin tocar columnas ni registros previos
-    if (colReqId === -1) {
-      colReqId = movHeaders.length;
-      sheetMov.getRange(1, colReqId + 1).setValue("REQUEST_ID");
-    }
-  } else {
-    sheetMov.appendRow(["FECHA", "USUARIO", "TIPO", "CÓDIGO", "CANTIDAD", "PRECIO DE VENTA", "TIPO DE VENTA", "PRECIO SIN IGV", "FORMA DE PAGO", "COMPROBANTE DE PAGO", "OBSERVACIÓN", "REQUEST_ID"]);
-    colFormaPago = 8;
-    colComprobantePago = 9;
-    colObs = 10;
-    colReqId = 11;
-  }
-
-  // 5. Comprobar idempotencia: ¿ya existe este requestId registrado?
-  if (movValues.length > 1 && colReqId !== -1 && colReqId < movValues[0].length) {
-    for (let i = 1; i < movValues.length; i++) {
-      const existingReq = String(movValues[i][colReqId] || "").trim();
-      if (existingReq && existingReq === requestId) {
-        // Encontrado: movimiento previamente registrado. Retornar éxito SIN duplicar inserción ni modificar stock.
-        let f = movValues[i][colFecha];
-        if (f instanceof Date) {
-          f = Utilities.formatDate(f, Session.getScriptTimeZone() || "GMT-5", "yyyy-MM-dd HH:mm:ss");
-        }
-        return {
-          status: "success",
-          idempotent: true,
-          message: "El movimiento ya fue registrado previamente.",
-          movement: {
-            fechaHora: String(f || ""),
-            usuario: colUser !== -1 ? String(movValues[i][colUser]) : usuario,
-            tipo: colTipo !== -1 ? String(movValues[i][colTipo]) : tipo,
-            codigo: colCod !== -1 ? String(movValues[i][colCod]) : codigo,
-            articulo: articuloNombre || codigo,
-            cantidad: colCant !== -1 ? (Number(movValues[i][colCant]) || cantidad) : cantidad,
-            precioVenta: (colPrecioVenta !== -1 && movValues[i][colPrecioVenta] !== "") ? Number(movValues[i][colPrecioVenta]) : null,
-            tipoVenta: (colTipoVenta !== -1 && movValues[i][colTipoVenta] !== "") ? String(movValues[i][colTipoVenta]) : "",
-            precioSinIgv: (colPrecioSinIgv !== -1 && movValues[i][colPrecioSinIgv] !== "") ? Number(movValues[i][colPrecioSinIgv]) : null,
-            formaPago: (colFormaPago !== -1 && movValues[i][colFormaPago] !== "") ? String(movValues[i][colFormaPago]) : "",
-            comprobantePago: (colComprobantePago !== -1 && movValues[i][colComprobantePago] !== "") ? String(movValues[i][colComprobantePago]) : "",
-            observacion: colObs !== -1 ? String(movValues[i][colObs]) : observacion,
-            requestId: requestId
-          }
-        };
-      }
-    }
-  }
-
-  // 6. Registrar en 'Movimientos' respetando las nuevas columnas (F: PRECIO DE VENTA, G: TIPO DE VENTA, H: PRECIO SIN IGV, I: FORMA DE PAGO, J: COMPROBANTE DE PAGO, K: OBSERVACIÓN)
+  // 5. Preparar datos para registro
   const ahora = new Date();
-  const fechaHoraStr = Utilities.formatDate(ahora, Session.getScriptTimeZone() || "GMT-5", "yyyy-MM-dd HH:mm:ss");
+  const tz = (ss && typeof ss.getSpreadsheetTimeZone === "function" && ss.getSpreadsheetTimeZone())
+    || (typeof Session !== "undefined" && Session.getScriptTimeZone && Session.getScriptTimeZone())
+    || "GMT-5";
+  const fechaHoraStr = (typeof Utilities !== "undefined" && Utilities.formatDate)
+    ? Utilities.formatDate(ahora, tz, "yyyy-MM-dd HH:mm:ss")
+    : ahora.toISOString().replace("T", " ").substring(0, 19);
 
   let precioVenta = null;
   let tipoVenta = "";
@@ -839,14 +1133,12 @@ function handleAddMovement(payload) {
     const rawP = (payload.precioVenta !== undefined && payload.precioVenta !== null && payload.precioVenta !== "") ? Number(payload.precioVenta) : null;
     if (rawP !== null && !isNaN(rawP) && rawP > 0) {
       precioVenta = Math.round(rawP * 100) / 100;
-      // Cálculo en el servidor de precioSinIgv: Precio de venta − (Precio de venta × 0.18), redondeado a 2 decimales
       const sinIgvCalc = precioVenta - (precioVenta * 0.18);
       precioSinIgv = parseFloat((Math.round(sinIgvCalc * 100) / 100).toFixed(2));
     }
     tipoVenta = String(payload.tipoVenta || "").trim();
     formaPago = String(payload.formaPago || "").trim();
 
-    // Determinar formato de comprobante con DNI o RUC
     if (payload.comprobantePago !== undefined && payload.comprobantePago !== null && String(payload.comprobantePago).trim() !== "") {
       comprobantePago = String(payload.comprobantePago).trim();
     } else if (payload.tipoComprobante) {
@@ -864,74 +1156,102 @@ function handleAddMovement(payload) {
     }
   }
 
-  const totalCols = Math.max(
-    movValues.length > 0 ? movValues[0].length : 11,
-    colReqId + 1,
-    colObs + 1,
-    colComprobantePago + 1,
-    colFormaPago + 1,
-    colPrecioSinIgv + 1,
-    11
-  );
-  const newRow = new Array(totalCols).fill("");
+  let targetMovementRow = existingRowIndex;
 
-  if (colFecha !== -1) newRow[colFecha] = fechaHoraStr;
-  if (colUser !== -1) newRow[colUser] = usuario;
-  if (colTipo !== -1) newRow[colTipo] = tipo;
-  if (colCod !== -1) newRow[colCod] = codigo;
-  if (colCant !== -1) newRow[colCant] = cantidad;
+  // Si no existía fila previa, insertar fila con estado inicial 'PENDING'
+  if (targetMovementRow === -1) {
+    const totalCols = Math.max(
+      movValues.length > 0 ? movValues[0].length : 13,
+      colEstadoOp + 1,
+      colReqId + 1,
+      colObs + 1,
+      colComprobantePago + 1,
+      colFormaPago + 1,
+      colPrecioSinIgv + 1,
+      13
+    );
+    const newRow = new Array(totalCols).fill("");
 
-  // Columnas F, G, H, Forma de Pago y Comprobante de Pago solo para SALIDA (en ENTRADA se dejan vacías "")
-  if (colPrecioVenta !== -1) {
-    newRow[colPrecioVenta] = (tipo === "SALIDA" && precioVenta !== null) ? precioVenta : "";
-  }
-  if (colTipoVenta !== -1) {
-    newRow[colTipoVenta] = (tipo === "SALIDA" && tipoVenta) ? tipoVenta : "";
-  }
-  if (colPrecioSinIgv !== -1) {
-    newRow[colPrecioSinIgv] = (tipo === "SALIDA" && precioSinIgv !== null) ? precioSinIgv : "";
-  }
-  if (colFormaPago !== -1) {
-    newRow[colFormaPago] = (tipo === "SALIDA" && formaPago) ? formaPago : "";
-  }
-  if (colComprobantePago !== -1) {
-    newRow[colComprobantePago] = (tipo === "SALIDA" && comprobantePago) ? comprobantePago : "";
+    if (colFecha !== -1) newRow[colFecha] = fechaHoraStr;
+    if (colUser !== -1) newRow[colUser] = usuario;
+    if (colTipo !== -1) newRow[colTipo] = tipo;
+    if (colCod !== -1) newRow[colCod] = codigo;
+    if (colCant !== -1) newRow[colCant] = cantidad;
+
+    if (colPrecioVenta !== -1) {
+      newRow[colPrecioVenta] = (tipo === "SALIDA" && precioVenta !== null) ? precioVenta : "";
+    }
+    if (colTipoVenta !== -1) {
+      newRow[colTipoVenta] = (tipo === "SALIDA" && tipoVenta) ? tipoVenta : "";
+    }
+    if (colPrecioSinIgv !== -1) {
+      newRow[colPrecioSinIgv] = (tipo === "SALIDA" && precioSinIgv !== null) ? precioSinIgv : "";
+    }
+    if (colFormaPago !== -1) {
+      newRow[colFormaPago] = (tipo === "SALIDA" && formaPago) ? formaPago : "";
+    }
+    if (colComprobantePago !== -1) {
+      newRow[colComprobantePago] = (tipo === "SALIDA" && comprobantePago) ? comprobantePago : "";
+    }
+
+    if (colObs !== -1) newRow[colObs] = observacion;
+    if (colReqId !== -1) newRow[colReqId] = requestId;
+    if (colEstadoOp !== -1) newRow[colEstadoOp] = "PENDING";
+
+    sheetMov.appendRow(newRow);
+    targetMovementRow = sheetMov.getLastRow();
   }
 
-  if (colObs !== -1) newRow[colObs] = observacion;
-  if (colReqId !== -1) newRow[colReqId] = requestId;
-
-  sheetMov.appendRow(newRow);
-
-  // 7. Actualizar 'Stock_Actual' de forma síncrona
+  // 6. Actualización transaccional de 'Stock_Actual'
   let nuevoStock = null;
-  if (sheetStock && stockRowIndex !== -1) {
-    if (tipo === "ENTRADA") {
-      actualEntradas += cantidad;
-      if (colEntradasIdx !== -1) {
-        sheetStock.getRange(stockRowIndex, colEntradasIdx + 1).setValue(actualEntradas);
+  try {
+    if (sheetStock && stockRowIndex !== -1) {
+      if (tipo === "ENTRADA") {
+        actualEntradas += cantidad;
+        if (colEntradasIdx !== -1) {
+          sheetStock.getRange(stockRowIndex, colEntradasIdx + 1).setValue(actualEntradas);
+        }
+      } else if (tipo === "SALIDA") {
+        actualSalidas += cantidad;
+        if (colSalidasIdx !== -1) {
+          sheetStock.getRange(stockRowIndex, colSalidasIdx + 1).setValue(actualSalidas);
+        }
       }
-    } else if (tipo === "SALIDA") {
-      actualSalidas += cantidad;
-      if (colSalidasIdx !== -1) {
-        sheetStock.getRange(stockRowIndex, colSalidasIdx + 1).setValue(actualSalidas);
+
+      nuevoStock = actualEntradas - actualSalidas;
+      if (colStockIdx !== -1) {
+        const currentFormula = sheetStock.getRange(stockRowIndex, colStockIdx + 1).getFormula();
+        if (!currentFormula) {
+          sheetStock.getRange(stockRowIndex, colStockIdx + 1).setValue(nuevoStock);
+        }
       }
     }
 
-    nuevoStock = actualEntradas - actualSalidas;
-    if (colStockIdx !== -1) {
-      const currentFormula = sheetStock.getRange(stockRowIndex, colStockIdx + 1).getFormula();
-      if (!currentFormula) {
-        sheetStock.getRange(stockRowIndex, colStockIdx + 1).setValue(nuevoStock);
-      }
+    // Actualización de inventario exitosa: marcar estado COMPLETED
+    if (colEstadoOp !== -1 && targetMovementRow > 1) {
+      sheetMov.getRange(targetMovementRow, colEstadoOp + 1).setValue("COMPLETED");
     }
+
+    SpreadsheetApp.flush();
+
+  } catch (stockErr) {
+    Logger.log("[Stock Error] Falló actualizar Stock_Actual para requestId " + requestId + ": " + stockErr.toString());
+    if (colEstadoOp !== -1 && targetMovementRow > 1) {
+      sheetMov.getRange(targetMovementRow, colEstadoOp + 1).setValue("FAILED");
+    }
+    SpreadsheetApp.flush();
+    return {
+      status: "error",
+      code: "STOCK_UPDATE_FAILED",
+      message: "Error al actualizar existencias: " + stockErr.message + ". Puedes reintentar con el mismo requestId para completar la operación de manera segura."
+    };
   }
-
-  SpreadsheetApp.flush();
 
   return {
     status: "success",
-    message: "Movimiento registrado exitosamente.",
+    message: existingRowData ? "Operación completada exitosamente tras recuperación." : "Movimiento registrado exitosamente.",
+    idempotent: !!existingRowData,
+    recovered: !!existingRowData,
     movement: {
       fechaHora: fechaHoraStr,
       usuario: usuario,
@@ -942,9 +1262,12 @@ function handleAddMovement(payload) {
       precioVenta: precioVenta,
       tipoVenta: tipoVenta,
       precioSinIgv: precioSinIgv,
+      formaPago: formaPago,
+      comprobantePago: comprobantePago,
       observacion: observacion,
       nuevoStock: nuevoStock,
-      requestId: requestId
+      requestId: requestId,
+      estadoOperacion: "COMPLETED"
     }
   };
 }
@@ -1052,6 +1375,7 @@ function getRecentMovements(limit) {
   const colComprobantePago = headers.findIndex(h => h.includes("COMPROBANTE DE PAGO") || h.includes("COMPROBANTE_PAGO") || h.includes("COMPROBANTE"));
   const colObs = headers.findIndex(h => h.includes("OBSERVACIÓN") || h.includes("OBSERVACION"));
   const colReqId = headers.indexOf("REQUEST_ID");
+  const colEstadoOp = headers.indexOf("ESTADO_OPERACION");
 
   const maxLimit = (typeof limit === "number" && limit > 0) ? limit : 200;
   const list = [];
@@ -1066,6 +1390,15 @@ function getRecentMovements(limit) {
 
     // Si la fila está completamente vacía, saltarla
     if ((rawFecha === "" || rawFecha === null || rawFecha === undefined) && !rawTipo && !rawCod) {
+      continue;
+    }
+
+    // Omitir transacciones fallidas para proteger la integridad de estadísticas e inventario
+    const estadoOp = (colEstadoOp !== -1 && row[colEstadoOp] !== undefined && row[colEstadoOp] !== "")
+      ? String(row[colEstadoOp]).trim().toUpperCase()
+      : "COMPLETED";
+
+    if (estadoOp === "FAILED") {
       continue;
     }
 
@@ -1100,7 +1433,8 @@ function getRecentMovements(limit) {
       formaPago: (colFormaPago !== -1 && row[colFormaPago] !== "") ? String(row[colFormaPago]).trim() : "",
       comprobantePago: (colComprobantePago !== -1 && row[colComprobantePago] !== "") ? String(row[colComprobantePago]).trim() : "",
       observacion: colObs !== -1 ? String(row[colObs] || "").trim() : "",
-      requestId: colReqId !== -1 ? String(row[colReqId] || "").trim() : ""
+      requestId: colReqId !== -1 ? String(row[colReqId] || "").trim() : "",
+      estadoOperacion: estadoOp
     });
   }
 
@@ -1170,19 +1504,19 @@ function setupSheet() {
     sheetMov = ss.insertSheet(SHEETS.MOVEMENTS);
   }
   sheetMov.clear();
-  sheetMov.appendRow(["FECHA", "USUARIO", "TIPO", "CÓDIGO", "CANTIDAD", "PRECIO DE VENTA", "TIPO DE VENTA", "PRECIO SIN IGV", "FORMA DE PAGO", "COMPROBANTE DE PAGO", "OBSERVACIÓN", "REQUEST_ID"]);
-  formatHeader(sheetMov, 12);
+  sheetMov.appendRow(["FECHA", "USUARIO", "TIPO", "CÓDIGO", "CANTIDAD", "PRECIO DE VENTA", "TIPO DE VENTA", "PRECIO SIN IGV", "FORMA DE PAGO", "COMPROBANTE DE PAGO", "OBSERVACIÓN", "REQUEST_ID", "ESTADO_OPERACION"]);
+  formatHeader(sheetMov, 13);
   
   const sampleMovs = [
-    ["2026-11-08 09:30:00", "admin", "ENTRADA", "CAM-001-M", 20, "Llegada lote confección taller"],
-    ["2026-11-08 10:15:20", "vendedor", "SALIDA", "CAM-002-M", 3, "Venta en tienda física cliente frecuente"],
-    ["2026-11-08 11:45:00", "vendedor", "SALIDA", "CAM-003-M", 2, "Pedido por WhatsApp entrega mensajería"],
-    ["2026-11-08 14:20:10", "inventario", "ENTRADA", "CAM-004-L", 15, "Reposición de bodega central"],
-    ["2026-11-08 16:05:40", "vendedor", "SALIDA", "CAM-001-XL", 2, "Venta factura electrónica #1042"]
+    ["2026-11-08 09:30:00", "admin", "ENTRADA", "CAM-001-M", 20, "", "", "", "", "", "Llegada lote confección taller", "REQ-INIT-001", "COMPLETED"],
+    ["2026-11-08 10:15:20", "mayte", "SALIDA", "CAM-002-M", 3, 95.00, "Unitario", 77.90, "Efectivo", "NO", "Venta en tienda física cliente frecuente", "REQ-INIT-002", "COMPLETED"],
+    ["2026-11-08 11:45:00", "mati", "SALIDA", "CAM-003-M", 2, 110.00, "Unitario", 90.20, "Transferencia", "NO", "Pedido por WhatsApp entrega mensajería", "REQ-INIT-003", "COMPLETED"],
+    ["2026-11-08 14:20:10", "admin", "ENTRADA", "CAM-004-L", 15, "", "", "", "", "", "Reposición de bodega central", "REQ-INIT-004", "COMPLETED"],
+    ["2026-11-08 16:05:40", "mayte", "SALIDA", "CAM-001-XL", 2, 85.00, "Unitario", 69.70, "Yape", "Boleta - DNI: 72849102", "Venta en tienda", "REQ-INIT-005", "COMPLETED"]
   ];
 
   sampleMovs.forEach(mov => sheetMov.appendRow(mov));
-  formatHeader(sheetMov, 6);
+  formatHeader(sheetMov, 13);
 
   SpreadsheetApp.flush();
 
