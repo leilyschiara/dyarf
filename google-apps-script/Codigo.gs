@@ -54,7 +54,7 @@ function doGet(e) {
         responseData = {
           status: "success",
           stock: getStockData(),
-          movements: getRecentMovements(30),
+          movements: getRecentMovements(200),
           timestamp: new Date().toISOString()
         };
         break;
@@ -67,7 +67,7 @@ function doGet(e) {
         break;
 
       case "getMovements":
-        const limit = parseInt(params.limit || "50", 10);
+        const limit = parseInt(params.limit || "200", 10);
         responseData = {
           status: "success",
           data: getRecentMovements(limit)
@@ -950,6 +950,80 @@ function handleAddMovement(payload) {
 }
 
 /**
+ * Parsea de manera exacta y robusta fechas de Google Sheets (Date o string)
+ * evitando desfases de día por zonas horarias.
+ */
+function parseMovementDateGAS(rawDate, timezone) {
+  if (rawDate === null || rawDate === undefined || rawDate === "") return "";
+
+  // Caso 1: Objeto Date nativo de Google Sheets
+  if (rawDate instanceof Date) {
+    if (isNaN(rawDate.getTime())) return "";
+    try {
+      if (typeof Utilities !== "undefined" && Utilities.formatDate) {
+        return Utilities.formatDate(rawDate, timezone, "yyyy-MM-dd HH:mm:ss");
+      }
+    } catch (e) {}
+    const pad = function(n) { return (n < 10 ? "0" : "") + n; };
+    return rawDate.getFullYear() + "-" + pad(rawDate.getMonth() + 1) + "-" + pad(rawDate.getDate()) + " " +
+           pad(rawDate.getHours()) + ":" + pad(rawDate.getMinutes()) + ":" + pad(rawDate.getSeconds());
+  }
+
+  const str = String(rawDate).trim();
+  if (!str) return "";
+
+  // Caso 2: Cadena YYYY-MM-DD o YYYY/MM/DD con o sin hora (ej: "2025-12-08", "2025-12-08 19:33:42")
+  const isoMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (isoMatch) {
+    const y = isoMatch[1];
+    const m = String(isoMatch[2]).padStart(2, "0");
+    const d = String(isoMatch[3]).padStart(2, "0");
+    const hh = isoMatch[4] ? String(isoMatch[4]).padStart(2, "0") : "00";
+    const mm = isoMatch[5] ? String(isoMatch[5]).padStart(2, "0") : "00";
+    const ss = isoMatch[6] ? String(isoMatch[6]).padStart(2, "0") : "00";
+    return y + "-" + m + "-" + d + " " + hh + ":" + mm + ":" + ss;
+  }
+
+  // Caso 3: Cadena formato latino DD/MM/YYYY o DD-MM-YYYY (ej: "08/12/2025", "08/12/2025 19:33:42")
+  const ddmmyyyy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (ddmmyyyy) {
+    const y = ddmmyyyy[3];
+    const m = String(ddmmyyyy[2]).padStart(2, "0");
+    const d = String(ddmmyyyy[1]).padStart(2, "0");
+    const hh = ddmmyyyy[4] ? String(ddmmyyyy[4]).padStart(2, "0") : "00";
+    const mm = ddmmyyyy[5] ? String(ddmmyyyy[5]).padStart(2, "0") : "00";
+    const ss = ddmmyyyy[6] ? String(ddmmyyyy[6]).padStart(2, "0") : "00";
+    return y + "-" + m + "-" + d + " " + hh + ":" + mm + ":" + ss;
+  }
+
+  // Caso 4: Fallback con new Date
+  try {
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      if (typeof Utilities !== "undefined" && Utilities.formatDate) {
+        return Utilities.formatDate(parsed, timezone, "yyyy-MM-dd HH:mm:ss");
+      }
+      const pad = function(n) { return (n < 10 ? "0" : "") + n; };
+      return parsed.getFullYear() + "-" + pad(parsed.getMonth() + 1) + "-" + pad(parsed.getDate()) + " " +
+             pad(parsed.getHours()) + ":" + pad(parsed.getMinutes()) + ":" + pad(parsed.getSeconds());
+    }
+  } catch (e) {}
+
+  return str;
+}
+
+/**
+ * Parsea un valor numérico tolerando texto, símbolos de moneda (S/) y comas decimales
+ */
+function parseSheetNumberGAS(val) {
+  if (val === null || val === undefined || val === "") return null;
+  if (typeof val === "number") return isNaN(val) ? null : val;
+  const clean = String(val).replace(/[^0-9.,-]/g, "").replace(",", ".");
+  const num = parseFloat(clean);
+  return isNaN(num) ? null : num;
+}
+
+/**
  * Obtiene los últimos movimientos registrados
  */
 function getRecentMovements(limit) {
@@ -959,6 +1033,11 @@ function getRecentMovements(limit) {
 
   const values = sheet.getDataRange().getValues();
   if (values.length <= 1) return [];
+
+  // Usar zona horaria de la hoja de cálculo para evitar desfases
+  const tz = (ss && typeof ss.getSpreadsheetTimeZone === "function" && ss.getSpreadsheetTimeZone()) 
+    || (typeof Session !== "undefined" && Session.getScriptTimeZone && Session.getScriptTimeZone()) 
+    || "GMT-5";
 
   const headers = values[0].map(h => String(h).trim().toUpperCase());
   const colFecha = headers.findIndex(h => h.includes("FECHA"));
@@ -974,28 +1053,54 @@ function getRecentMovements(limit) {
   const colObs = headers.findIndex(h => h.includes("OBSERVACIÓN") || h.includes("OBSERVACION"));
   const colReqId = headers.indexOf("REQUEST_ID");
 
+  const maxLimit = (typeof limit === "number" && limit > 0) ? limit : 200;
   const list = [];
+
   // Recorrer en orden inverso (más recientes primero)
-  for (let i = values.length - 1; i >= 1 && list.length < limit; i--) {
+  for (let i = values.length - 1; i >= 1 && list.length < maxLimit; i--) {
     const row = values[i];
-    let fecha = (colFecha !== -1 && row[colFecha]) ? row[colFecha] : row[0];
-    if (fecha instanceof Date) {
-      fecha = Utilities.formatDate(fecha, Session.getScriptTimeZone() || "GMT-5", "yyyy-MM-dd HH:mm:ss");
+
+    const rawFecha = (colFecha !== -1 && row[colFecha] !== undefined && row[colFecha] !== null) ? row[colFecha] : row[0];
+    const rawTipo = colTipo !== -1 ? row[colTipo] : "";
+    const rawCod = colCod !== -1 ? row[colCod] : "";
+
+    // Si la fila está completamente vacía, saltarla
+    if ((rawFecha === "" || rawFecha === null || rawFecha === undefined) && !rawTipo && !rawCod) {
+      continue;
     }
 
+    // Parsear fecha de forma robusta respetando zona horaria sin desfases
+    const fechaHora = parseMovementDateGAS(rawFecha, tz);
+    if (!fechaHora) {
+      continue;
+    }
+
+    const tipo = String(rawTipo || "ENTRADA").trim().toUpperCase();
+    const precioVentaNum = (colPrecioVenta !== -1 && row[colPrecioVenta] !== undefined)
+      ? parseSheetNumberGAS(row[colPrecioVenta])
+      : null;
+    const precioSinIgvNum = (colPrecioSinIgv !== -1 && row[colPrecioSinIgv] !== undefined)
+      ? parseSheetNumberGAS(row[colPrecioSinIgv])
+      : null;
+    const cantNum = (colCant !== -1 && row[colCant] !== undefined)
+      ? (parseSheetNumberGAS(row[colCant]) || 1)
+      : 1;
+
+    // IMPORTANTE: No descartar ni ignorar filas si la columna REQUEST_ID o algún campo secundario está vacío,
+    // siempre y cuando la fila tenga datos válidos
     list.push({
-      fechaHora: String(fecha || ""),
-      usuario: colUser !== -1 ? String(row[colUser] || "") : "",
-      tipo: colTipo !== -1 ? String(row[colTipo] || "ENTRADA") : "ENTRADA",
-      codigo: colCod !== -1 ? String(row[colCod] || "") : "",
-      cantidad: colCant !== -1 ? Number(row[colCant]) || 0 : 0,
-      precioVenta: (colPrecioVenta !== -1 && row[colPrecioVenta] !== "" && !isNaN(Number(row[colPrecioVenta]))) ? Number(row[colPrecioVenta]) : null,
-      tipoVenta: (colTipoVenta !== -1 && row[colTipoVenta] !== "") ? String(row[colTipoVenta]) : "",
-      precioSinIgv: (colPrecioSinIgv !== -1 && row[colPrecioSinIgv] !== "" && !isNaN(Number(row[colPrecioSinIgv]))) ? Number(row[colPrecioSinIgv]) : null,
-      formaPago: (colFormaPago !== -1 && row[colFormaPago] !== "") ? String(row[colFormaPago]) : "",
-      comprobantePago: (colComprobantePago !== -1 && row[colComprobantePago] !== "") ? String(row[colComprobantePago]) : "",
-      observacion: colObs !== -1 ? String(row[colObs] || "") : "",
-      requestId: colReqId !== -1 ? String(row[colReqId] || "") : ""
+      fechaHora: fechaHora,
+      usuario: colUser !== -1 ? String(row[colUser] || "").trim() : "",
+      tipo: tipo,
+      codigo: colCod !== -1 ? String(row[colCod] || "").trim() : "",
+      cantidad: cantNum,
+      precioVenta: precioVentaNum,
+      tipoVenta: (colTipoVenta !== -1 && row[colTipoVenta] !== "") ? String(row[colTipoVenta]).trim() : "",
+      precioSinIgv: precioSinIgvNum,
+      formaPago: (colFormaPago !== -1 && row[colFormaPago] !== "") ? String(row[colFormaPago]).trim() : "",
+      comprobantePago: (colComprobantePago !== -1 && row[colComprobantePago] !== "") ? String(row[colComprobantePago]).trim() : "",
+      observacion: colObs !== -1 ? String(row[colObs] || "").trim() : "",
+      requestId: colReqId !== -1 ? String(row[colReqId] || "").trim() : ""
     });
   }
 

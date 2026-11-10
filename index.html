@@ -17,7 +17,7 @@
   <link rel="apple-touch-icon" href="public/icon-192.png">
 
   <!-- Estilos CSS -->
-  <link rel="stylesheet" href="src/styles.css?v=6.5">
+  <link rel="stylesheet" href="src/styles.css?v=6.6">
 </head>
 <body>
 
@@ -209,11 +209,55 @@
                 </div>
               </div>
 
-              <!-- Selector de Rango: Día, Mes, Año (Oculto por defecto, visible al dar clic en el lápiz) -->
-              <div class="stats-period-selector hidden" id="stats-period-selector">
-                <button type="button" class="stats-period-pill active" data-period="HOY">Día</button>
-                <button type="button" class="stats-period-pill" data-period="MES">Mes</button>
-                <button type="button" class="stats-period-pill" data-period="ANIO">Año</button>
+              <!-- Contenedor de Selección de Fecha con 3 Desplegables (Oculto por defecto, se conmuta con el botón del lápiz) -->
+              <div class="stats-date-filters hidden" id="stats-date-filters">
+                <div class="stats-date-filters-grid">
+                  <div class="stats-filter-field">
+                    <label for="stats-filter-dia">Día</label>
+                    <select id="stats-filter-dia" class="stats-select">
+                      <option value="ALL">Todos los días</option>
+                      <!-- 01 al 31 se pueblan dinámicamente -->
+                    </select>
+                  </div>
+
+                  <div class="stats-filter-field">
+                    <label for="stats-filter-mes">Mes</label>
+                    <select id="stats-filter-mes" class="stats-select">
+                      <option value="0">Enero</option>
+                      <option value="1">Febrero</option>
+                      <option value="2">Marzo</option>
+                      <option value="3">Abril</option>
+                      <option value="4">Mayo</option>
+                      <option value="5">Junio</option>
+                      <option value="6">Julio</option>
+                      <option value="7">Agosto</option>
+                      <option value="8">Septiembre</option>
+                      <option value="9">Octubre</option>
+                      <option value="10">Noviembre</option>
+                      <option value="11">Diciembre</option>
+                    </select>
+                  </div>
+
+                  <div class="stats-filter-field">
+                    <label for="stats-filter-anio">Año</label>
+                    <select id="stats-filter-anio" class="stats-select">
+                      <option value="2026">2026</option>
+                      <option value="2025">2025</option>
+                      <option value="2024">2024</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="stats-filter-actions">
+                  <span id="stats-filter-summary-text" class="stats-filter-summary">Filtrando: Hoy</span>
+                  <button type="button" id="stats-filter-reset-btn" class="stats-filter-reset-btn" title="Restablecer filtros a la fecha actual">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                      <path d="M3 3v5h5"/>
+                    </svg>
+                    Restablecer
+                  </button>
+                </div>
               </div>
             </div>
 

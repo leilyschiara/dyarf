@@ -247,7 +247,7 @@ class SheetsAPI {
   /**
    * Obtener historial reciente de Movimientos
    */
-  async getMovements(limit = 30) {
+  async getMovements(limit = 200) {
     if (this.isDemoMode || !this.apiUrl) {
       let cached = this.getLocalMovements();
       if (!cached || cached.length === 0) {

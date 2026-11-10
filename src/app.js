@@ -9,6 +9,11 @@ const AppState = {
   stock: [],
   movements: [],
   statsPeriod: "HOY",
+  statsFilter: {
+    dia: String(new Date().getDate()).padStart(2, "0"),
+    mes: String(new Date().getMonth()),
+    anio: String(new Date().getFullYear())
+  },
   lastSyncTime: 0,
   filterSize: "ALL",
   filterAvailability: "ALL",
@@ -337,40 +342,8 @@ function bindGlobalEvents() {
     });
   });
 
-  // Botón lápiz para mostrar/ocultar selector de período en Dashboard Estadístico
-  const filterToggleBtn = document.getElementById("stats-filter-toggle-btn");
-  const periodSelector = document.getElementById("stats-period-selector");
-  if (filterToggleBtn && periodSelector) {
-    filterToggleBtn.addEventListener("click", () => {
-      const isHidden = periodSelector.classList.contains("hidden");
-      if (isHidden) {
-        periodSelector.classList.remove("hidden");
-        filterToggleBtn.classList.add("active");
-      } else {
-        periodSelector.classList.add("hidden");
-        if (AppState.statsPeriod === "HOY") {
-          filterToggleBtn.classList.remove("active");
-        }
-      }
-    });
-  }
-
-  // Selector de Rango de Tiempo en Dashboard Estadístico (Día, Mes, Año)
-  document.querySelectorAll("#stats-period-selector .stats-period-pill").forEach(pill => {
-    pill.addEventListener("click", () => {
-      document.querySelectorAll("#stats-period-selector .stats-period-pill").forEach(p => p.classList.remove("active"));
-      pill.classList.add("active");
-      AppState.statsPeriod = pill.dataset.period || "HOY";
-      if (filterToggleBtn) {
-        if (AppState.statsPeriod !== "HOY") {
-          filterToggleBtn.classList.add("active");
-        } else if (periodSelector && periodSelector.classList.contains("hidden")) {
-          filterToggleBtn.classList.remove("active");
-        }
-      }
-      renderStatsDashboard();
-    });
-  });
+  // Inicializar selector de fecha con 3 desplegables (Día, Mes, Año) en Dashboard Estadístico
+  initStatsDateFilters();
 
   // Modal Settings
   const saveApiBtn = document.getElementById("save-api-btn");
@@ -722,7 +695,7 @@ async function loadAppData(options = {}) {
   try {
     const [stockRes, movsRes] = await Promise.all([
       window.api.getStock(),
-      window.api.getMovements(50)
+      window.api.getMovements(200)
     ]);
 
     if (stockRes.success && stockRes.data) {
@@ -940,7 +913,8 @@ function renderDashboard() {
     }
   }
 
-  // Renderizar Dashboard Estadístico de Ventas (KPIs, Gráfico SVG y Top 3)
+  // Sincronizar años disponibles y renderizar Dashboard Estadístico
+  populateStatsYears();
   renderStatsDashboard();
 }
 
@@ -1840,38 +1814,88 @@ async function handleMovementSubmit(e) {
 }
 
 /**
+ * Extrae los componentes numéricos exactos de una fecha (año, mes base 0, día, hora, minuto, segundo)
+ * de forma independiente de la zona horaria del navegador, evitando desfases por UTC.
+ */
+function parseMovementDateParts(raw) {
+  if (raw === null || raw === undefined || raw === "") return null;
+
+  if (raw instanceof Date) {
+    if (isNaN(raw.getTime())) return null;
+    return {
+      year: parseInt(raw.getFullYear(), 10),
+      month: parseInt(raw.getMonth(), 10), // Base 0: 0 = Enero, 11 = Diciembre
+      day: parseInt(raw.getDate(), 10),
+      hour: parseInt(raw.getHours(), 10),
+      minute: parseInt(raw.getMinutes(), 10),
+      second: parseInt(raw.getSeconds(), 10),
+      dateObj: raw
+    };
+  }
+
+  const str = String(raw).trim();
+  if (!str) return null;
+
+  // 1. Formato YYYY-MM-DD o YYYY/MM/DD con o sin hora (ej: "2025-12-08", "2025-12-08 19:33:42")
+  const isoMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10) - 1; // Base 0: Diciembre = 11
+    const day = parseInt(isoMatch[3], 10);
+    const hour = isoMatch[4] ? parseInt(isoMatch[4], 10) : 0;
+    const minute = isoMatch[5] ? parseInt(isoMatch[5], 10) : 0;
+    const second = isoMatch[6] ? parseInt(isoMatch[6], 10) : 0;
+    return {
+      year,
+      month,
+      day,
+      hour,
+      minute,
+      second,
+      dateObj: new Date(year, month, day, hour, minute, second)
+    };
+  }
+
+  // 2. Formato latino DD/MM/YYYY o DD-MM-YYYY (ej: "08/12/2025", "08/12/2025 19:33:42")
+  const ddmmyyyy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (ddmmyyyy) {
+    const year = parseInt(ddmmyyyy[3], 10);
+    const month = parseInt(ddmmyyyy[2], 10) - 1; // Base 0: Diciembre = 11
+    const day = parseInt(ddmmyyyy[1], 10);
+    const hour = ddmmyyyy[4] ? parseInt(ddmmyyyy[4], 10) : 0;
+    const minute = ddmmyyyy[5] ? parseInt(ddmmyyyy[5], 10) : 0;
+    const second = ddmmyyyy[6] ? parseInt(ddmmyyyy[6], 10) : 0;
+    return {
+      year,
+      month,
+      day,
+      hour,
+      minute,
+      second,
+      dateObj: new Date(year, month, day, hour, minute, second)
+    };
+  }
+
+  // 3. Fallback genérico si no coincide con formatos estándar
+  const fallback = new Date(str);
+  if (isNaN(fallback.getTime())) return null;
+  return {
+    year: parseInt(fallback.getFullYear(), 10),
+    month: parseInt(fallback.getMonth(), 10),
+    day: parseInt(fallback.getDate(), 10),
+    hour: parseInt(fallback.getHours(), 10),
+    minute: parseInt(fallback.getMinutes(), 10),
+    second: parseInt(fallback.getSeconds(), 10),
+    dateObj: fallback
+  };
+}
+
+/**
  * Parsea de manera robusta cualquier formato de fecha de Google Sheets o JS
  */
 function parseMovementDate(raw) {
-  if (!raw) return null;
-  if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
-  let d = new Date(raw);
-  if (isNaN(d.getTime())) {
-    const isoMatch = String(raw).match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
-    if (isoMatch) {
-      d = new Date(
-        parseInt(isoMatch[1], 10),
-        parseInt(isoMatch[2], 10) - 1,
-        parseInt(isoMatch[3], 10),
-        isoMatch[4] ? parseInt(isoMatch[4], 10) : 0,
-        isoMatch[5] ? parseInt(isoMatch[5], 10) : 0,
-        isoMatch[6] ? parseInt(isoMatch[6], 10) : 0
-      );
-    } else {
-      const ddmmyyyy = String(raw).match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
-      if (ddmmyyyy) {
-        d = new Date(
-          parseInt(ddmmyyyy[3], 10),
-          parseInt(ddmmyyyy[2], 10) - 1,
-          parseInt(ddmmyyyy[1], 10),
-          ddmmyyyy[4] ? parseInt(ddmmyyyy[4], 10) : 0,
-          ddmmyyyy[5] ? parseInt(ddmmyyyy[5], 10) : 0,
-          ddmmyyyy[6] ? parseInt(ddmmyyyy[6], 10) : 0
-        );
-      }
-    }
-  }
-  return isNaN(d.getTime()) ? null : d;
+  const parts = parseMovementDateParts(raw);
+  return parts ? parts.dateObj : null;
 }
 
 /**
@@ -2220,65 +2244,272 @@ function getProductName(codigo, fallbackArticulo) {
 }
 
 /**
- * Renderizado principal de las métricas del Dashboard Estadístico
+ * ==========================================================================
+ * FILTRADO DINÁMICO Y MÉTRICAS DEL DASHBOARD ESTADÍSTICO
+ * ==========================================================================
  */
-function renderStatsDashboard() {
-  const period = AppState.statsPeriod || "HOY";
-  const movs = AppState.movements || [];
-  const stock = AppState.stock || [];
-  const now = new Date();
 
-  // Sincronizar estado visual del botón lápiz según período
-  const filterToggleBtn = document.getElementById("stats-filter-toggle-btn");
-  const periodSelector = document.getElementById("stats-period-selector");
-  if (filterToggleBtn) {
-    if (period !== "HOY") {
-      filterToggleBtn.classList.add("active");
-    } else if (periodSelector && periodSelector.classList.contains("hidden")) {
-      filterToggleBtn.classList.remove("active");
+/**
+ * Inicializa y puebla los desplegables de fecha en el Dashboard Estadístico
+ */
+function initStatsDateFilters() {
+  const diaSelect = document.getElementById("stats-filter-dia");
+  const mesSelect = document.getElementById("stats-filter-mes");
+  const anioSelect = document.getElementById("stats-filter-anio");
+  const resetBtn = document.getElementById("stats-filter-reset-btn");
+  const toggleBtn = document.getElementById("stats-filter-toggle-btn");
+  const container = document.getElementById("stats-date-filters");
+
+  const now = new Date();
+  const currentDia = String(now.getDate()).padStart(2, "0");
+  const currentMes = String(now.getMonth());
+  const currentAnio = String(now.getFullYear());
+
+  if (!AppState.statsFilter) {
+    AppState.statsFilter = { dia: currentDia, mes: currentMes, anio: currentAnio };
+  }
+
+  // 1. Poblar días del 01 al 31 si no están ya poblados
+  if (diaSelect && diaSelect.options.length <= 1) {
+    diaSelect.innerHTML = `<option value="ALL">Todos los días</option>`;
+    for (let i = 1; i <= 31; i++) {
+      const val = String(i).padStart(2, "0");
+      diaSelect.innerHTML += `<option value="${val}">${val}</option>`;
     }
   }
 
-  // Filtrar exclusivamente ventas (SALIDA)
-  const salesMovements = movs.filter(m => m.tipo === "SALIDA");
+  // 2. Establecer valor inicial de día
+  if (diaSelect) {
+    diaSelect.value = AppState.statsFilter.dia || currentDia;
+  }
 
-  // 1. Ventas del Día (Siempre calcula el total de hoy)
-  let ventasHoy = 0;
-  let txHoyCount = 0;
-  salesMovements.forEach(m => {
-    const d = parseMovementDate(m.fechaHora);
-    if (d && d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
-      ventasHoy += (parseFloat(m.precioVenta) || 0);
-      txHoyCount++;
+  // 3. Establecer valor inicial de mes
+  if (mesSelect) {
+    mesSelect.value = AppState.statsFilter.mes !== undefined ? String(AppState.statsFilter.mes) : currentMes;
+  }
+
+  // 4. Poblar años disponibles
+  populateStatsYears();
+
+  // 5. Conectar eventos change a cada select
+  if (diaSelect && !diaSelect._boundChange) {
+    diaSelect._boundChange = true;
+    diaSelect.addEventListener("change", handleDateFilterChange);
+  }
+  if (mesSelect && !mesSelect._boundChange) {
+    mesSelect._boundChange = true;
+    mesSelect.addEventListener("change", handleDateFilterChange);
+  }
+  if (anioSelect && !anioSelect._boundChange) {
+    anioSelect._boundChange = true;
+    anioSelect.addEventListener("change", handleDateFilterChange);
+  }
+
+  // 6. Botón reset
+  if (resetBtn && !resetBtn._boundClick) {
+    resetBtn._boundClick = true;
+    resetBtn.addEventListener("click", () => resetStatsDateFilter());
+  }
+
+  // 7. Botón lápiz para toggle del contenedor
+  if (toggleBtn && container && !toggleBtn._boundClick) {
+    toggleBtn._boundClick = true;
+    toggleBtn.addEventListener("click", () => {
+      const isHidden = container.classList.contains("hidden");
+      if (isHidden) {
+        container.classList.remove("hidden");
+        toggleBtn.classList.add("active");
+      } else {
+        container.classList.add("hidden");
+        updateStatsFilterToggleBtnState();
+      }
+    });
+  }
+
+  updateStatsFilterSummaryText();
+  updateStatsFilterToggleBtnState();
+}
+
+/**
+ * Puebla el selector de años dinámicamente con los años presentes en movimientos
+ */
+function populateStatsYears() {
+  const anioSelect = document.getElementById("stats-filter-anio");
+  if (!anioSelect) return;
+
+  const nowYear = new Date().getFullYear();
+  const yearsSet = new Set([nowYear, 2026, 2025, 2024]);
+
+  const movs = AppState.movements || [];
+  movs.forEach(m => {
+    const parts = parseMovementDateParts(m.fechaHora);
+    if (parts && !isNaN(parts.year)) {
+      yearsSet.add(parseInt(parts.year, 10));
     }
   });
 
-  // 2. Ventas del Período Seleccionado (Hoy, Este Mes, Este Año)
+  const years = Array.from(yearsSet).sort((a, b) => b - a);
+  const currentVal = AppState.statsFilter ? String(AppState.statsFilter.anio) : String(nowYear);
+
+  anioSelect.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join("");
+  anioSelect.value = years.includes(parseInt(currentVal, 10)) ? currentVal : String(nowYear);
+}
+
+/**
+ * Maneja el cambio de selección en cualquiera de los desplegables de fecha
+ */
+function handleDateFilterChange() {
+  const diaSelect = document.getElementById("stats-filter-dia");
+  const mesSelect = document.getElementById("stats-filter-mes");
+  const anioSelect = document.getElementById("stats-filter-anio");
+
+  if (!AppState.statsFilter) AppState.statsFilter = {};
+  if (diaSelect) AppState.statsFilter.dia = diaSelect.value;
+  if (mesSelect) AppState.statsFilter.mes = mesSelect.value;
+  if (anioSelect) AppState.statsFilter.anio = anioSelect.value;
+
+  updateStatsFilterSummaryText();
+  updateStatsFilterToggleBtnState();
+  renderStatsDashboard();
+}
+
+/**
+ * Restablece los filtros de fecha a la fecha actual (Día actual, Mes actual y Año actual)
+ */
+window.resetStatsDateFilter = function() {
+  const now = new Date();
+  const currentDia = String(now.getDate()).padStart(2, "0");
+  const currentMes = String(now.getMonth());
+  const currentAnio = String(now.getFullYear());
+
+  AppState.statsFilter = {
+    dia: currentDia,
+    mes: currentMes,
+    anio: currentAnio
+  };
+
+  const diaSelect = document.getElementById("stats-filter-dia");
+  const mesSelect = document.getElementById("stats-filter-mes");
+  const anioSelect = document.getElementById("stats-filter-anio");
+
+  if (diaSelect) diaSelect.value = currentDia;
+  if (mesSelect) mesSelect.value = currentMes;
+  if (anioSelect) anioSelect.value = currentAnio;
+
+  updateStatsFilterSummaryText();
+  updateStatsFilterToggleBtnState();
+  renderStatsDashboard();
+};
+
+/**
+ * Verifica si el filtro actual coincide exactamente con el día de hoy
+ */
+function isStatsFilterToday() {
+  if (!AppState.statsFilter) return true;
+  const now = new Date();
+  const currentDia = parseInt(now.getDate(), 10);
+  const currentMes = parseInt(now.getMonth(), 10);
+  const currentAnio = parseInt(now.getFullYear(), 10);
+
+  const filterDia = AppState.statsFilter.dia === "ALL" ? null : parseInt(AppState.statsFilter.dia, 10);
+  const filterMes = parseInt(AppState.statsFilter.mes, 10);
+  const filterAnio = parseInt(AppState.statsFilter.anio, 10);
+
+  return filterDia === currentDia && filterMes === currentMes && filterAnio === currentAnio;
+}
+
+/**
+ * Actualiza el estado visual del botón del lápiz (resaltado si está abierto o si hay un filtro personalizado)
+ */
+function updateStatsFilterToggleBtnState() {
+  const toggleBtn = document.getElementById("stats-filter-toggle-btn");
+  const container = document.getElementById("stats-date-filters");
+  if (!toggleBtn) return;
+
+  const isOpen = container && !container.classList.contains("hidden");
+  const isCustom = !isStatsFilterToday();
+
+  if (isOpen || isCustom) {
+    toggleBtn.classList.add("active");
+  } else {
+    toggleBtn.classList.remove("active");
+  }
+}
+
+/**
+ * Actualiza el texto de resumen del filtro activo
+ */
+function updateStatsFilterSummaryText() {
+  const summaryEl = document.getElementById("stats-filter-summary-text");
+  if (!summaryEl || !AppState.statsFilter) return;
+
+  const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const { dia, mes, anio } = AppState.statsFilter;
+  const mesName = monthNames[parseInt(mes, 10)] || "Mes";
+
+  if (isStatsFilterToday()) {
+    summaryEl.textContent = `Filtrando: Hoy (${dia}/${parseInt(mes, 10) + 1}/${anio})`;
+  } else if (dia === "ALL") {
+    summaryEl.textContent = `Filtrando: Todo ${mesName} ${anio}`;
+  } else {
+    summaryEl.textContent = `Filtrando: ${dia} de ${mesName} de ${anio}`;
+  }
+}
+
+/**
+ * Renderizado principal de las métricas del Dashboard Estadístico
+ */
+function renderStatsDashboard() {
+  const now = new Date();
+  if (!AppState.statsFilter) {
+    AppState.statsFilter = {
+      dia: String(now.getDate()).padStart(2, "0"),
+      mes: String(now.getMonth()),
+      anio: String(now.getFullYear())
+    };
+  }
+
+  const { dia, mes, anio } = AppState.statsFilter;
+  const filterAnio = parseInt(anio, 10);
+  const filterMes = parseInt(mes, 10);
+  const filterDia = dia === "ALL" ? null : parseInt(dia, 10);
+
+  const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const mesName = monthNames[filterMes] || "Mes";
+
+  // Filtrar exclusivamente ventas (SALIDA) de forma insensible a mayúsculas/minúsculas y espacios
+  const movs = AppState.movements || [];
+  const salesMovements = movs.filter(m => String(m.tipo || "").trim().toUpperCase() === "SALIDA");
+
+  // Filtrar según combinación Día/Mes/Año seleccionada comparando valores numéricos con parseInt
   const periodSales = salesMovements.filter(m => {
-    const d = parseMovementDate(m.fechaHora);
-    if (!d) return false;
-    if (period === "HOY") {
-      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-    } else if (period === "MES") {
-      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-    } else if (period === "ANIO") {
-      return d.getFullYear() === now.getFullYear();
-    }
+    const parts = parseMovementDateParts(m.fechaHora);
+    if (!parts) return false;
+
+    const movYear = parseInt(parts.year, 10);
+    const movMonth = parseInt(parts.month, 10); // Base 0: 0 = Enero, 11 = Diciembre
+    const movDay = parseInt(parts.day, 10);
+
+    if (movYear !== filterAnio) return false;
+    if (movMonth !== filterMes) return false;
+    if (filterDia !== null && movDay !== filterDia) return false;
     return true;
   });
 
   let totalVentasPeriodo = 0;
   let totalProductosVendidos = 0;
   periodSales.forEach(m => {
-    totalVentasPeriodo += (parseFloat(m.precioVenta) || 0);
-    totalProductosVendidos += (parseInt(m.cantidad, 10) || 0);
+    const amt = parseFloat(String(m.precioVenta !== undefined && m.precioVenta !== null ? m.precioVenta : "0").replace(/[^0-9.,-]/g, "").replace(",", ".")) || 0;
+    const qty = parseInt(String(m.cantidad || "1").replace(/[^0-9-]/g, ""), 10) || 1;
+    totalVentasPeriodo += amt;
+    totalProductosVendidos += qty;
   });
 
-  // Ticket Promedio (Promedio por transacción en el período seleccionado)
   const txPeriodoCount = periodSales.length;
   const ticketPromedio = txPeriodoCount > 0 ? (totalVentasPeriodo / txPeriodoCount) : 0;
+  const hasRecords = txPeriodoCount > 0;
 
-  // Actualizar Tarjetas de Resumen (KPIs)
+  // 1. Tarjetas de Resumen (KPIs)
   const statVentasLabel = document.getElementById("stat-ventas-label");
   const statVentasVal = document.getElementById("stat-ventas-val");
   const statVentasHint = document.getElementById("stat-ventas-hint");
@@ -2287,19 +2518,27 @@ function renderStatsDashboard() {
   const statAlertasVal = document.getElementById("stat-alertas-val");
   const statAlertasHint = document.getElementById("stat-alertas-hint");
 
+  // Título dinámico del card 1: "Ventas del [Día/Mes/Año]"
+  if (statVentasLabel) {
+    if (filterDia !== null) {
+      statVentasLabel.innerHTML = "Ventas<br>del Día";
+    } else {
+      statVentasLabel.innerHTML = "Ventas<br>del Mes";
+    }
+  }
+
   if (statVentasVal) {
-    if (period === "HOY") {
-      if (statVentasLabel) statVentasLabel.innerHTML = "Ventas<br>del Día";
-      statVentasVal.textContent = `S/ ${ventasHoy.toFixed(2)}`;
-      if (statVentasHint) statVentasHint.textContent = `${txHoyCount} venta${txHoyCount === 1 ? '' : 's'} hoy`;
-    } else if (period === "MES") {
-      if (statVentasLabel) statVentasLabel.innerHTML = "Ventas<br>del Mes";
-      statVentasVal.textContent = `S/ ${totalVentasPeriodo.toFixed(2)}`;
-      if (statVentasHint) statVentasHint.textContent = `Hoy: S/ ${ventasHoy.toFixed(2)} (${txPeriodoCount} en mes)`;
-    } else if (period === "ANIO") {
-      if (statVentasLabel) statVentasLabel.innerHTML = "Ventas<br>del Año";
-      statVentasVal.textContent = `S/ ${totalVentasPeriodo.toFixed(2)}`;
-      if (statVentasHint) statVentasHint.textContent = `Hoy: S/ ${ventasHoy.toFixed(2)} (${txPeriodoCount} en año)`;
+    statVentasVal.textContent = `S/ ${totalVentasPeriodo.toFixed(2)}`;
+  }
+  if (statVentasHint) {
+    if (hasRecords) {
+      if (filterDia !== null) {
+        statVentasHint.textContent = `${txPeriodoCount} transaccione${txPeriodoCount === 1 ? '' : 's'} (${String(filterDia).padStart(2, '0')}/${String(filterMes + 1).padStart(2, '0')})`;
+      } else {
+        statVentasHint.textContent = `${txPeriodoCount} transaccione${txPeriodoCount === 1 ? '' : 's'} en ${mesName}`;
+      }
+    } else {
+      statVentasHint.textContent = "No se encontraron registros para esta fecha";
     }
   }
 
@@ -2307,50 +2546,51 @@ function renderStatsDashboard() {
     statTicketVal.textContent = `S/ ${ticketPromedio.toFixed(2)}`;
   }
   if (statTicketHint) {
-    statTicketHint.textContent = txPeriodoCount > 0 
-      ? `${txPeriodoCount} transaccione${txPeriodoCount === 1 ? '' : 's'}`
-      : "Sin ventas en rango";
+    statTicketHint.textContent = hasRecords
+      ? `Promedio por transacción (${txPeriodoCount})`
+      : "No se encontraron registros para esta fecha";
   }
 
   if (statAlertasVal) {
     statAlertasVal.textContent = totalProductosVendidos;
   }
   if (statAlertasHint) {
-    if (period === "HOY") {
-      statAlertasHint.textContent = `${totalProductosVendidos} unid. vendidas hoy`;
-    } else if (period === "MES") {
-      statAlertasHint.textContent = `${totalProductosVendidos} unid. en este mes`;
-    } else if (period === "ANIO") {
-      statAlertasHint.textContent = `${totalProductosVendidos} unid. en este año`;
-    } else {
-      statAlertasHint.textContent = `${totalProductosVendidos} unid. en período`;
-    }
+    statAlertasHint.textContent = hasRecords
+      ? `${totalProductosVendidos} unid. vendidas`
+      : "No se encontraron registros para esta fecha";
   }
 
-  // 3. Renderizar Gráfico Estadístico de Ventas (SVG Ligero)
+  // 2. Gráfico Estadístico de Ventas (SVG Ligero)
   const chartTitleEl = document.getElementById("stats-chart-title");
   const chartTotalEl = document.getElementById("stats-chart-period-total");
   const chartContainer = document.getElementById("stats-chart-container");
 
-  const periodLabels = {
-    "HOY": "Tendencia de Ventas (Hoy)",
-    "MES": "Tendencia de Ventas (Este Mes)",
-    "ANIO": `Tendencia de Ventas (${now.getFullYear()})`
-  };
+  let chartTitleText = "Tendencia de Ventas";
+  if (isStatsFilterToday()) {
+    chartTitleText = "Tendencia de Ventas (Hoy)";
+  } else if (filterDia !== null) {
+    chartTitleText = `Tendencia de Ventas (${String(filterDia).padStart(2, '0')}/${String(filterMes + 1).padStart(2, '0')}/${filterAnio})`;
+  } else {
+    chartTitleText = `Tendencia de Ventas (${mesName} ${filterAnio})`;
+  }
 
-  if (chartTitleEl) chartTitleEl.textContent = periodLabels[period] || "Tendencia de Ventas";
+  if (chartTitleEl) chartTitleEl.textContent = chartTitleText;
   if (chartTotalEl) chartTotalEl.textContent = `Ingresos: S/ ${totalVentasPeriodo.toFixed(2)}`;
 
   if (chartContainer) {
-    chartContainer.innerHTML = generateSalesChartSvg(period, periodSales, totalVentasPeriodo);
+    chartContainer.innerHTML = generateSalesChartSvg(AppState.statsFilter, periodSales, totalVentasPeriodo);
   }
 
-  // 4. Renderizar Top 3 Productos Más Vendidos
+  // 3. Top 3 Productos Más Vendidos
   const topPeriodLabel = document.getElementById("stats-top-period-label");
   if (topPeriodLabel) {
-    topPeriodLabel.textContent = period === "HOY" 
-      ? "En el día de hoy" 
-      : (period === "MES" ? "En este mes" : "En este año");
+    if (isStatsFilterToday()) {
+      topPeriodLabel.textContent = "En el día de hoy";
+    } else if (filterDia !== null) {
+      topPeriodLabel.textContent = `Para el ${String(filterDia).padStart(2, '0')}/${String(filterMes + 1).padStart(2, '0')}/${filterAnio}`;
+    } else {
+      topPeriodLabel.textContent = `Para ${mesName} ${filterAnio}`;
+    }
   }
 
   const prodMap = new Map();
@@ -2360,21 +2600,24 @@ function renderStatsDashboard() {
       prodMap.set(name, { name, units: 0, totalMoney: 0 });
     }
     const r = prodMap.get(name);
-    r.units += (parseInt(m.cantidad, 10) || 1);
-    r.totalMoney += (parseFloat(m.precioVenta) || 0);
+    const amt = parseFloat(String(m.precioVenta !== undefined && m.precioVenta !== null ? m.precioVenta : "0").replace(/[^0-9.,-]/g, "").replace(",", ".")) || 0;
+    const qty = parseInt(String(m.cantidad || "1").replace(/[^0-9-]/g, ""), 10) || 1;
+    r.units += qty;
+    r.totalMoney += amt;
   });
 
   const top3 = Array.from(prodMap.values())
     .sort((a, b) => b.units - a.units || b.totalMoney - a.totalMoney)
     .slice(0, 3);
 
-  renderTopProducts(top3);
+  renderTopProducts(top3, hasRecords);
+  updateStatsFilterToggleBtnState();
 }
 
 /**
  * Genera un gráfico de barras vectorial SVG ultraligero y responsivo
  */
-function generateSalesChartSvg(period, periodSales, totalPeriodSales) {
+function generateSalesChartSvg(filter, periodSales, totalPeriodSales) {
   const width = 360;
   const height = 150;
   const padLeft = 38;
@@ -2384,9 +2627,10 @@ function generateSalesChartSvg(period, periodSales, totalPeriodSales) {
   const plotW = width - padLeft - padRight;
   const plotH = height - padTop - padBottom;
 
+  const isAllDays = filter && filter.dia === "ALL";
   let buckets = [];
 
-  if (period === "HOY") {
+  if (!isAllDays) {
     // 7 intervalos de horas en el día comercial
     buckets = [
       { label: "8-10h", total: 0, minHour: 8, maxHour: 10 },
@@ -2398,17 +2642,17 @@ function generateSalesChartSvg(period, periodSales, totalPeriodSales) {
       { label: "20h+", total: 0, minHour: 20, maxHour: 24 }
     ];
 
-    periodSales.forEach(m => {
-      const d = parseMovementDate(m.fechaHora);
-      if (d) {
-        const h = d.getHours();
-        const amt = parseFloat(m.precioVenta) || 0;
+    (periodSales || []).forEach(m => {
+      const parts = parseMovementDateParts(m.fechaHora);
+      if (parts) {
+        const h = parseInt(parts.hour, 10);
+        const amt = parseFloat(String(m.precioVenta !== undefined && m.precioVenta !== null ? m.precioVenta : "0").replace(/[^0-9.,-]/g, "").replace(",", ".")) || 0;
         const target = buckets.find(b => h >= b.minHour && h < b.maxHour) || (h < 8 ? buckets[0] : buckets[buckets.length - 1]);
         if (target) target.total += amt;
       }
     });
-  } else if (period === "MES") {
-    // 5 semanas del mes actual
+  } else {
+    // 5 semanas del mes
     buckets = [
       { label: "Sem 1", total: 0, minDay: 1, maxDay: 7 },
       { label: "Sem 2", total: 0, minDay: 8, maxDay: 14 },
@@ -2417,26 +2661,13 @@ function generateSalesChartSvg(period, periodSales, totalPeriodSales) {
       { label: "Sem 5", total: 0, minDay: 29, maxDay: 31 }
     ];
 
-    periodSales.forEach(m => {
-      const d = parseMovementDate(m.fechaHora);
-      if (d) {
-        const day = d.getDate();
-        const amt = parseFloat(m.precioVenta) || 0;
+    (periodSales || []).forEach(m => {
+      const parts = parseMovementDateParts(m.fechaHora);
+      if (parts) {
+        const day = parseInt(parts.day, 10);
+        const amt = parseFloat(String(m.precioVenta !== undefined && m.precioVenta !== null ? m.precioVenta : "0").replace(/[^0-9.,-]/g, "").replace(",", ".")) || 0;
         const target = buckets.find(b => day >= b.minDay && day <= b.maxDay) || buckets[buckets.length - 1];
         if (target) target.total += amt;
-      }
-    });
-  } else if (period === "ANIO") {
-    // 12 meses del año actual
-    const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-    buckets = monthNames.map((m, idx) => ({ label: m, total: 0, monthIndex: idx }));
-
-    periodSales.forEach(m => {
-      const d = parseMovementDate(m.fechaHora);
-      if (d) {
-        const mIdx = d.getMonth();
-        const amt = parseFloat(m.precioVenta) || 0;
-        if (buckets[mIdx]) buckets[mIdx].total += amt;
       }
     });
   }
@@ -2502,9 +2733,9 @@ function generateSalesChartSvg(period, periodSales, totalPeriodSales) {
       ${barsSvg}
 
       ${!hasAnySales ? `
-        <rect x="${padLeft + 10}" y="${padTop + 20}" width="${plotW - 20}" height="${plotH - 30}" rx="8" fill="rgba(255,255,255,0.85)"/>
-        <text x="${width / 2}" y="${padTop + plotH / 2 - 2}" text-anchor="middle" font-size="11" font-weight="700" fill="#64748b">Sin ventas en este rango</text>
-        <text x="${width / 2}" y="${padTop + plotH / 2 + 14}" text-anchor="middle" font-size="9" font-weight="500" fill="#94a3b8">Registra salidas para ver la tendencia</text>
+        <rect x="${padLeft + 8}" y="${padTop + 14}" width="${plotW - 16}" height="${plotH - 28}" rx="8" fill="rgba(255,255,255,0.92)" stroke="#fbcfe8" stroke-width="1"/>
+        <text x="${width / 2}" y="${padTop + plotH / 2 - 2}" text-anchor="middle" font-size="10.5" font-weight="700" fill="#831843">No se encontraron registros para esta fecha</text>
+        <text x="${width / 2}" y="${padTop + plotH / 2 + 13}" text-anchor="middle" font-size="8.5" font-weight="500" fill="#9d174d">Modifica los filtros o presiona Restablecer</text>
       ` : ''}
     </svg>
   `;
@@ -2513,15 +2744,25 @@ function generateSalesChartSvg(period, periodSales, totalPeriodSales) {
 /**
  * Renderiza la lista corta del Top 3 Productos Más Vendidos
  */
-function renderTopProducts(top3) {
+function renderTopProducts(top3, hasRecords) {
   const container = document.getElementById("stats-top-products-list");
   if (!container) return;
 
-  if (!top3 || top3.length === 0) {
+  if (!hasRecords || !top3 || top3.length === 0) {
     container.innerHTML = `
       <div class="stats-empty-view">
-        <div style="font-size:1.6rem; margin-bottom:4px;">🛍️</div>
-        <span>Aún no hay ventas registradas en este período.</span>
+        <div style="font-size:1.6rem; margin-bottom:4px;">🔍</div>
+        <div style="font-weight:700; color:#831843; font-size:0.85rem; margin-bottom:2px;">No se encontraron registros para esta fecha</div>
+        <span style="font-size:0.72rem; color:#94a3b8;">No se registraron ventas para la fecha seleccionada.</span>
+        <div style="margin-top:10px;">
+          <button type="button" class="stats-filter-reset-btn" onclick="resetStatsDateFilter()">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+              <path d="M3 3v5h5"/>
+            </svg>
+            Restablecer a Hoy
+          </button>
+        </div>
       </div>
     `;
     return;

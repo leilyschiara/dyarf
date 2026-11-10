@@ -872,40 +872,96 @@ body {
   box-shadow: 0 2px 6px rgba(190, 24, 93, 0.3);
 }
 
-/* Selector de Rango de Tiempo (Pills) */
-.stats-period-selector {
+/* Contenedor de Filtros de Fecha Avanzados (3 Desplegables: Día, Mes, Año) */
+.stats-date-filters {
+  background: #fdf2f8;
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  border: 1px solid #fbcfe8;
+  margin-top: 4px;
+  animation: fadeIn 0.2s ease;
+}
+
+.stats-date-filters-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.stats-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stats-filter-field label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #9d174d;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stats-select {
+  width: 100%;
+  padding: 7px 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--dark);
+  background: #ffffff;
+  border: 1.5px solid #fbcfe8;
+  border-radius: var(--radius-sm);
+  outline: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23be185d' stroke-width='2.5'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  background-size: 11px;
+  padding-right: 20px;
+}
+
+.stats-select:focus {
+  border-color: #be185d;
+  box-shadow: 0 0 0 2px rgba(190, 24, 93, 0.15);
+}
+
+.stats-filter-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
-  background: #fdf2f8;
-  padding: 4px;
-  border-radius: 9999px;
-  border: 1px solid #fbcfe8;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(190, 24, 93, 0.2);
 }
 
-.stats-period-pill {
-  flex: 1;
-  padding: 6px 10px;
-  border-radius: 9999px;
-  border: none;
-  background: transparent;
-  color: #831843;
-  font-size: 0.75rem;
+.stats-filter-summary {
+  font-size: 0.7rem;
   font-weight: 700;
-  cursor: pointer;
-  text-align: center;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  user-select: none;
+  color: #831843;
 }
 
-.stats-period-pill.active {
+.stats-filter-reset-btn {
+  background: #ffffff;
+  border: 1px solid #fbcfe8;
+  color: #9d174d;
+  border-radius: 9999px;
+  padding: 3px 10px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.stats-filter-reset-btn:hover {
   background: #be185d;
   color: #ffffff;
-  box-shadow: 0 2px 6px rgba(190, 24, 93, 0.3);
-}
-
-.stats-period-pill:active {
-  transform: scale(0.96);
+  border-color: #be185d;
 }
 
 /* Tarjetas de Resumen (KPIs) con scroll horizontal si sobrepasa el ancho */
