@@ -17,7 +17,7 @@
   <link rel="apple-touch-icon" href="public/icon-192.png">
 
   <!-- Estilos CSS -->
-  <link rel="stylesheet" href="src/styles.css?v=6.4">
+  <link rel="stylesheet" href="src/styles.css?v=6.5">
 </head>
 <body>
 
@@ -195,17 +195,25 @@
                     <line x1="6" y1="20" x2="6" y2="14"></line>
                   </svg>
                 </div>
-                <div>
-                  <h3 class="stats-title">Dashboard Estadístico</h3>
+                <div style="flex: 1;">
+                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                    <h3 class="stats-title">Dashboard Estadístico</h3>
+                    <button type="button" id="stats-filter-toggle-btn" class="stats-pencil-btn" title="Filtrar por Día, Mes o Año" aria-label="Filtrar por período">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 20h9"></path>
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                      </svg>
+                    </button>
+                  </div>
                   <span class="stats-sub">Métricas y rendimiento de ventas</span>
                 </div>
               </div>
 
-              <!-- Selector de Rango: Hoy, Este Mes, Este Año -->
-              <div class="stats-period-selector" id="stats-period-selector">
-                <button type="button" class="stats-period-pill active" data-period="HOY">Hoy</button>
-                <button type="button" class="stats-period-pill" data-period="MES">Este Mes</button>
-                <button type="button" class="stats-period-pill" data-period="ANIO">Este Año</button>
+              <!-- Selector de Rango: Día, Mes, Año (Oculto por defecto, visible al dar clic en el lápiz) -->
+              <div class="stats-period-selector hidden" id="stats-period-selector">
+                <button type="button" class="stats-period-pill active" data-period="HOY">Día</button>
+                <button type="button" class="stats-period-pill" data-period="MES">Mes</button>
+                <button type="button" class="stats-period-pill" data-period="ANIO">Año</button>
               </div>
             </div>
 
@@ -289,8 +297,8 @@
             </div>
           </div>
 
-          <!-- Alertas de Stock Crítico (Agrupado por Producto) -->
-          <div class="critical-card-container">
+          <!-- Alertas de Stock Crítico (Agrupado por Producto - Contraído por defecto) -->
+          <div class="critical-card-container is-collapsed">
             <div class="critical-card-header" id="critical-card-toggle" onclick="toggleCriticalList()">
               <div>
                 <h3 class="critical-card-title">Stock Crítico</h3>
@@ -298,12 +306,12 @@
               </div>
               <div class="critical-count-pill" id="critical-count-pill">
                 <span id="critical-count-text">0 productos</span>
-                <svg id="critical-chevron-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                  <polyline points="18 15 12 9 6 15"></polyline>
+                <svg id="critical-chevron-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="transition: transform 0.25s ease;">
+                  <polyline points="6 9 12 15 18 9"></polyline>
                 </svg>
               </div>
             </div>
-            <div id="critical-stock-list" class="critical-stock-list">
+            <div id="critical-stock-list" class="critical-stock-list" style="display: none;">
               <!-- Inyectado dinámicamente -->
             </div>
           </div>

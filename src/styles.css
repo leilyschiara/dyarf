@@ -839,6 +839,39 @@ body {
   margin-top: 2px;
 }
 
+.stats-pencil-btn {
+  background: #ffffff;
+  border: 1px solid #fbcfe8;
+  color: #9d174d;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 0;
+  box-shadow: 0 1px 3px rgba(190, 24, 93, 0.08);
+  flex-shrink: 0;
+}
+
+.stats-pencil-btn:hover {
+  background: #fdf2f8;
+  border-color: #f472b6;
+  color: #831843;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(190, 24, 93, 0.15);
+}
+
+.stats-pencil-btn:active,
+.stats-pencil-btn.active {
+  background: #be185d;
+  border-color: #be185d;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(190, 24, 93, 0.3);
+}
+
 /* Selector de Rango de Tiempo (Pills) */
 .stats-period-selector {
   display: flex;
@@ -875,24 +908,31 @@ body {
   transform: scale(0.96);
 }
 
-/* Tarjetas de Resumen (KPIs) */
+/* Tarjetas de Resumen (KPIs) con scroll horizontal si sobrepasa el ancho */
 .stats-kpis-container {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  display: flex;
   gap: 8px;
   padding: 14px 14px 10px 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(190, 24, 93, 0.2) transparent;
 }
 
-@media (max-width: 360px) {
-  .stats-kpis-container {
-    grid-template-columns: 1fr 1fr;
-  }
-  .stats-kpi-item.kpi-item-sales {
-    grid-column: span 2;
-  }
+.stats-kpis-container::-webkit-scrollbar {
+  height: 4px;
+}
+
+.stats-kpis-container::-webkit-scrollbar-thumb {
+  background: rgba(190, 24, 93, 0.2);
+  border-radius: 9999px;
 }
 
 .stats-kpi-item {
+  flex: 1 0 114px;
+  min-width: 114px;
   background: #fafafa;
   border: 1px solid #f1f5f9;
   border-radius: 12px;
@@ -906,6 +946,21 @@ body {
 .stats-kpi-item:hover {
   transform: translateY(-1px);
   box-shadow: 0 3px 8px rgba(0,0,0,0.04);
+}
+
+.stats-kpi-item.kpi-item-sales {
+  background: rgb(247 232 242 / 40%);
+  border-color: rgba(247, 232, 242, 0.9);
+}
+
+.stats-kpi-item.kpi-item-ticket {
+  background: rgb(229 241 253 / 40%);
+  border-color: rgba(229, 241, 253, 0.9);
+}
+
+.stats-kpi-item.kpi-item-alert {
+  background: rgb(216 249 217 / 40%);
+  border-color: rgba(216, 249, 217, 0.9);
 }
 
 .stats-kpi-top-row {
@@ -945,8 +1000,8 @@ body {
 }
 
 .stats-kpi-icon-wrap.icon-alert {
-  background: #fef2f2;
-  color: #ef4444;
+  background: rgb(216 249 217 / 40%);
+  color: #31cc36;
 }
 
 .stats-kpi-number {
@@ -1204,6 +1259,10 @@ body {
   border-bottom: 1px solid #fce7f3;
   cursor: pointer;
   user-select: none;
+}
+
+.critical-card-container.is-collapsed .critical-card-header {
+  border-bottom: none;
 }
 
 .critical-card-title {
@@ -1853,6 +1912,8 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+
 
 .option-btn {
   padding: 10px 8px;

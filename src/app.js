@@ -337,12 +337,37 @@ function bindGlobalEvents() {
     });
   });
 
-  // Selector de Rango de Tiempo en Dashboard Estadístico (Hoy, Este Mes, Este Año)
+  // Botón lápiz para mostrar/ocultar selector de período en Dashboard Estadístico
+  const filterToggleBtn = document.getElementById("stats-filter-toggle-btn");
+  const periodSelector = document.getElementById("stats-period-selector");
+  if (filterToggleBtn && periodSelector) {
+    filterToggleBtn.addEventListener("click", () => {
+      const isHidden = periodSelector.classList.contains("hidden");
+      if (isHidden) {
+        periodSelector.classList.remove("hidden");
+        filterToggleBtn.classList.add("active");
+      } else {
+        periodSelector.classList.add("hidden");
+        if (AppState.statsPeriod === "HOY") {
+          filterToggleBtn.classList.remove("active");
+        }
+      }
+    });
+  }
+
+  // Selector de Rango de Tiempo en Dashboard Estadístico (Día, Mes, Año)
   document.querySelectorAll("#stats-period-selector .stats-period-pill").forEach(pill => {
     pill.addEventListener("click", () => {
       document.querySelectorAll("#stats-period-selector .stats-period-pill").forEach(p => p.classList.remove("active"));
       pill.classList.add("active");
       AppState.statsPeriod = pill.dataset.period || "HOY";
+      if (filterToggleBtn) {
+        if (AppState.statsPeriod !== "HOY") {
+          filterToggleBtn.classList.add("active");
+        } else if (periodSelector && periodSelector.classList.contains("hidden")) {
+          filterToggleBtn.classList.remove("active");
+        }
+      }
       renderStatsDashboard();
     });
   });
@@ -1120,13 +1145,21 @@ window.quickReponerAction = function(codigo) {
  * Colapsar o expandir la tarjeta de Stock Crítico
  */
 window.toggleCriticalList = function() {
+  const container = document.querySelector(".critical-card-container");
   const list = document.getElementById("critical-stock-list");
   const icon = document.getElementById("critical-chevron-icon");
   if (!list) return;
   const isHidden = list.style.display === "none";
   list.style.display = isHidden ? "block" : "none";
+  if (container) {
+    if (isHidden) {
+      container.classList.remove("is-collapsed");
+    } else {
+      container.classList.add("is-collapsed");
+    }
+  }
   if (icon) {
-    icon.style.transform = isHidden ? "rotate(0deg)" : "rotate(180deg)";
+    icon.style.transform = isHidden ? "rotate(180deg)" : "rotate(0deg)";
   }
 };
 
@@ -2194,6 +2227,17 @@ function renderStatsDashboard() {
   const movs = AppState.movements || [];
   const stock = AppState.stock || [];
   const now = new Date();
+
+  // Sincronizar estado visual del botón lápiz según período
+  const filterToggleBtn = document.getElementById("stats-filter-toggle-btn");
+  const periodSelector = document.getElementById("stats-period-selector");
+  if (filterToggleBtn) {
+    if (period !== "HOY") {
+      filterToggleBtn.classList.add("active");
+    } else if (periodSelector && periodSelector.classList.contains("hidden")) {
+      filterToggleBtn.classList.remove("active");
+    }
+  }
 
   // Filtrar exclusivamente ventas (SALIDA)
   const salesMovements = movs.filter(m => m.tipo === "SALIDA");
