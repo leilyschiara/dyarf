@@ -1801,7 +1801,7 @@ body {
 .size-btn.active {
   border: 2px solid var(--primary);
   background: #ffffff;
-  color: var(--primary);
+  color: #000000;
   box-shadow: 0 4px 14px var(--primary-glow);
   transform: translateY(-2px);
 }
@@ -1809,15 +1809,16 @@ body {
 .size-btn.active:hover {
   border-color: var(--primary);
   background: #ffffff;
+  color: #000000;
 }
 
 .size-btn.active .size-letter {
-  color: var(--primary);
+  color: #000000;
   font-weight: 800;
 }
 
 .size-btn.active .size-stock-sub {
-  color: var(--primary);
+  color: var(--text-muted);
   font-weight: 700;
 }
 
@@ -1877,7 +1878,7 @@ body {
 .option-btn.active {
   border: 2px solid var(--primary);
   background: #ffffff;
-  color: var(--primary);
+  color: #000000;
   box-shadow: 0 4px 14px var(--primary-glow);
   transform: translateY(-2px);
   font-weight: 800;
@@ -1886,18 +1887,20 @@ body {
 .option-btn.active:hover {
   border-color: var(--primary);
   background: #ffffff;
+  color: #000000;
 }
 
 #entrada-obs-buttons .option-btn.active {
   border: 2px solid var(--success);
   background: #ffffff;
-  color: var(--success);
+  color: #000000;
   box-shadow: 0 4px 14px rgba(16, 185, 129, 0.2);
 }
 
 #entrada-obs-buttons .option-btn.active:hover {
   border-color: var(--success);
   background: #ffffff;
+  color: #000000;
 }
 
 .comprobante-subcard {
