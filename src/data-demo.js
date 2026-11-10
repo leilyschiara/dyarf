@@ -3,9 +3,9 @@
  */
 window.DEMO_DATA = {
   users: [
-    { id: 1, usuario: "mayte", pass: "1234", estado: 1, rol: "Usuario" },
-    { id: 2, usuario: "mati", pass: "2222", estado: 1, rol: "Usuario" },
-    { id: 3, usuario: "admin", pass: "1111", estado: 1, rol: "Administrador" }
+    { id: 1, usuario: "mayte", estado: 1, rol: "Usuario" },
+    { id: 2, usuario: "mati", estado: 1, rol: "Usuario" },
+    { id: 3, usuario: "admin", estado: 1, rol: "Administrador" }
   ],
   stock: [
     { codigo: "CAM-001-S", articulo: "Camisa Oxford Clásica Celeste", talla: "S", entradas: 25, salidas: 12, stockDisponible: 13, precio: 85000 },

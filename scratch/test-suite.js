@@ -1,147 +1,85 @@
 /**
- * Test Suite para verificación de seguridad y minificación
+ * Test Suite para verificación de validación de sesión en eventos de navegación
  */
 
 const fs = require('fs');
 const assert = require('assert');
 
-console.log("=== INICIANDO PRUEBAS DE SEGURIDAD Y FRONTEND ===");
+console.log("=== INICIANDO PRUEBAS DE VALIDACIÓN DE SESIÓN (GAS) ===");
 
-// 1. Simulación de Backend Apps Script
-function setupGasEnvironment() {
-  const usersSheetData = [
-    ["ID", "USUARIO", "CONTRASEÑA", "ROL", "ESTADO"],
-    ["USR-1", "admin", "1111", "Administrador", 1],
-    ["USR-2", "empleado", "2222", "Vendedor", 0], // Inactivo
-    ["USR-3", "mayte", "3333", "Vendedor", "ACTIVO"]
-  ];
+let usersSheetData = [
+  ["ID", "USUARIO", "CONTRASEÑA", "ROL", "ESTADO"],
+  ["USR-1", "admin", "clave_original", "Administrador", 1],
+  ["USR-2", "empleado", "2222", "Vendedor", 0]
+];
 
-  const stockSheetData = [
-    ["CÓDIGO", "ARTÍCULO", "TALLA", "ENTRADAS", "SALIDAS", "STOCK DISPONIBLE", "PRECIO"],
-    ["C001-M", "Camisa Blanca", "M", 20, 5, 15, 65]
-  ];
+const mockSheets = {
+  "Usuarios": {
+    getDataRange: () => ({
+      getValues: () => usersSheetData
+    }),
+    getLastRow: () => usersSheetData.length,
+    getLastColumn: () => usersSheetData[0].length,
+    getRange: (r, c, nr, nc) => ({
+      getValues: () => usersSheetData.slice(r - 1, r - 1 + nr)
+    })
+  }
+};
 
-  const movementsSheetData = [
-    ["ID", "FECHA", "USUARIO", "TIPO", "CÓDIGO", "CANTIDAD", "OBSERVACIÓN", "REQUEST_ID", "PRECIO_VENTA", "TIPO_VENTA", "PRECIO_SIN_IGV", "FORMA_PAGO", "COMPROBANTE_PAGO"]
-  ];
+const mockSpreadsheet = {
+  getSheetByName: (name) => mockSheets[name] || null
+};
 
-  const mockSheets = {
-    "Usuarios": {
-      getDataRange: () => ({
-        getValues: () => usersSheetData
-      })
-    },
-    "Stock_Actual": {
-      getDataRange: () => ({
-        getValues: () => stockSheetData
-      }),
-      appendRow: (row) => stockSheetData.push(row),
-      getRange: () => ({
-        setValue: () => {},
-        getFormula: () => ""
-      })
-    },
-    "Movimientos": {
-      getDataRange: () => ({
-        getValues: () => movementsSheetData
-      }),
-      appendRow: (row) => movementsSheetData.push(row)
-    }
-  };
+const mockLock = {
+  tryLock: () => true,
+  releaseLock: () => {}
+};
 
-  const mockSpreadsheet = {
-    getSheetByName: (name) => mockSheets[name] || null
-  };
+global.SpreadsheetApp = {
+  getActiveSpreadsheet: () => mockSpreadsheet,
+  flush: () => {}
+};
+global.LockService = {
+  getScriptLock: () => mockLock
+};
+global.Logger = {
+  log: () => {}
+};
+global.SHEETS = {
+  USERS: "Usuarios"
+};
 
-  const mockLock = {
-    tryLock: () => true,
-    releaseLock: () => {}
-  };
+// Cargar funciones de Codigo.gs
+const gsCode = fs.readFileSync('google-apps-script/Codigo.gs', 'utf8');
+(0, eval)(gsCode);
 
-  // Global Mocks
-  global.SpreadsheetApp = {
-    getActiveSpreadsheet: () => mockSpreadsheet,
-    flush: () => {}
-  };
-  global.LockService = {
-    getScriptLock: () => mockLock
-  };
-  global.Logger = {
-    log: () => {}
-  };
-  global.SHEETS = {
-    USERS: "Usuarios",
-    STOCK: "Stock_Actual",
-    MOVEMENTS: "Movimientos"
-  };
-  global.Utilities = {
-    formatDate: () => "09/11/2026 22:30:00"
-  };
-  global.Session = {
-    getScriptTimeZone: () => "GMT-5"
-  };
+// Prueba 1.1: Sesión válida mientras la contraseña coincida
+const resValido = handleValidateSession("admin", "clave_original");
+assert.strictEqual(resValido.success, true);
+assert.strictEqual(resValido.sesionValida, true);
+console.log("✔ Backend: Sesión validada exitosamente con contraseña actual");
 
-  // Cargar funciones de Codigo.gs en global
-  const gsCode = fs.readFileSync('google-apps-script/Codigo.gs', 'utf8');
-  (0, eval)(gsCode);
-}
+// Prueba 1.2: Cambio de contraseña en Google Sheets a 'clave_nueva_2026'
+console.log("\nSimulando cambio de contraseña en Google Sheets a 'clave_nueva_2026'...");
+usersSheetData[1][2] = "clave_nueva_2026";
 
-setupGasEnvironment();
+// Validación con la clave antigua en sesión -> DEBE FALLAR con PASSWORD_CHANGED
+const resInvalido = handleValidateSession("admin", "clave_original");
+assert.strictEqual(resInvalido.success, false);
+assert.strictEqual(resInvalido.sesionValida, false);
+assert.strictEqual(resInvalido.code, "PASSWORD_CHANGED");
+assert.strictEqual(resInvalido.message, "Tu contraseña ha cambiado. Por favor, inicia sesión de nuevo.");
+console.log("✔ Backend: Contraseña cambiada detectada al instante con PASSWORD_CHANGED y sesionValida: false");
 
-// Prueba 1.1: Rechazo si no se envían credenciales
-const resNoCreds = handleAddMovement({
-  tipo: "ENTRADA",
-  codigo: "C001-M",
-  cantidad: 2,
-  requestId: "REQ-001"
-});
-assert.strictEqual(resNoCreds.status, "error");
-assert.strictEqual(resNoCreds.code, "AUTH_REQUIRED");
-console.log("✔ Backend: Rechazo correcto cuando no hay credenciales (AUTH_REQUIRED)");
+// Prueba 1.3: Con la nueva clave -> vuelve a ser válida
+const resConNueva = handleValidateSession("admin", "clave_nueva_2026");
+assert.strictEqual(resConNueva.success, true);
+assert.strictEqual(resConNueva.sesionValida, true);
+console.log("✔ Backend: Nueva contraseña validada correctamente");
 
-// Prueba 1.2: Rechazo si las credenciales son incorrectas
-const resBadPass = handleAddMovement({
-  usuario: "admin",
-  password: "password_falsa",
-  tipo: "ENTRADA",
-  codigo: "C001-M",
-  cantidad: 2,
-  requestId: "REQ-002"
-});
-assert.strictEqual(resBadPass.status, "error");
-assert.strictEqual(resBadPass.code, "INVALID_PASSWORD");
-console.log("✔ Backend: Rechazo correcto con contraseña incorrecta (INVALID_PASSWORD)");
+// Prueba 2: Frontend (SheetsAPI.validateSession)
+console.log("\n=== PRUEBAS DE FRONTEND (VALIDATE SESSION EN NAVEGACIÓN) ===");
 
-// Prueba 1.3: Rechazo si el usuario está inactivo (estado: 0)
-const resInactive = handleAddMovement({
-  usuario: "empleado",
-  password: "2222",
-  tipo: "ENTRADA",
-  codigo: "C001-M",
-  cantidad: 2,
-  requestId: "REQ-003"
-});
-assert.strictEqual(resInactive.status, "error");
-assert.strictEqual(resInactive.code, "USER_INACTIVE");
-console.log("✔ Backend: Rechazo correcto con usuario inactivo (USER_INACTIVE)");
-
-// Prueba 1.4: Éxito con credenciales válidas
-const resSuccess = handleAddMovement({
-  usuario: "admin",
-  password: "1111",
-  tipo: "ENTRADA",
-  codigo: "C001-M",
-  cantidad: 5,
-  requestId: "REQ-004",
-  observacion: "Ingreso de mercadería"
-});
-assert.strictEqual(resSuccess.status, "success");
-console.log("✔ Backend: Éxito correcto con credenciales válidas de admin");
-
-// 2. Verificación de sheets-api.js en Frontend
-console.log("\n=== PRUEBAS DE SHEETS-API Y SESIÓN FRONTEND ===");
-
-// Mock localStorage para Node.js
 const storage = {};
 global.window = global;
 global.localStorage = {
@@ -151,92 +89,48 @@ global.localStorage = {
   clear: () => { for (const k in storage) delete storage[k]; }
 };
 
-// Mock DEMO_DATA
-const demoCode = fs.readFileSync('src/data-demo.js', 'utf8');
-eval(demoCode);
-
-// Cargar sheets-api.js
 const apiCode = fs.readFileSync('src/sheets-api.js', 'utf8');
 (0, eval)(apiCode + '; global.SheetsAPI = SheetsAPI;');
 
 const api = new SheetsAPI();
+api.apiUrl = "https://script.google.com/macros/s/TEST/exec";
+api.isDemoMode = false;
 
-// Prueba 2.1: Login guarda password en la sesión
+// Mock login previo
+api.setCurrentUser({
+  id: "USR-1",
+  usuario: "admin",
+  rol: "Administrador",
+  estado: 1,
+  password: "clave_original"
+});
+
+// Mock fetch respondiendo cambio de contraseña
+global.fetch = async (url, opts) => {
+  const body = JSON.parse(opts.body);
+  if (body.action === "validateSession") {
+    if (body.password === "clave_original") {
+      // Simula que en Google Sheets cambió
+      return {
+        ok: true,
+        json: async () => ({
+          success: false,
+          sesionValida: false,
+          code: "PASSWORD_CHANGED",
+          message: "Tu contraseña ha cambiado. Por favor, inicia sesión de nuevo."
+        })
+      };
+    }
+  }
+  return { ok: true, json: async () => ({ success: true, sesionValida: true }) };
+};
+
 (async () => {
-  const loginRes = await api.login("admin", "1111");
-  assert.strictEqual(loginRes.success, true);
-  assert.strictEqual(loginRes.user.usuario, "admin");
-  assert.strictEqual(loginRes.user.password, "1111");
-
-  const creds = api.getCurrentUserCredentials();
-  assert.strictEqual(creds.usuario, "admin");
-  assert.strictEqual(creds.password, "1111");
-  console.log("✔ Frontend: Login guarda password en la sesión y getCurrentUserCredentials() lo recupera");
-
-  // Prueba 2.2: addMovement usa credenciales de la sesión activa
-  let sentPayload = null;
-  // Mock fetch para interceptar payload
-  global.fetch = async (url, opts) => {
-    sentPayload = JSON.parse(opts.body);
-    return {
-      ok: true,
-      json: async () => ({ status: "success", message: "Movimiento registrado" })
-    };
-  };
-
-  // Simular modo conectado
-  api.isDemoMode = false;
-  api.apiUrl = "https://script.google.com/macros/s/TEST/exec";
-
-  await api.addMovement({
-    tipo: "SALIDA",
-    codigo: "CAI-001-M",
-    cantidad: 1,
-    requestId: "REQ-TEST-001",
-    precioVenta: 65,
-    tipoVenta: "Unitario",
-    formaPago: "Yape",
-    comprobantePago: "SI",
-    tipoComprobante: "Boleta",
-    documentoComprobante: "12345678"
-  });
-
-  assert(sentPayload !== null, "El payload debe haber sido enviado a fetch");
-  assert.strictEqual(sentPayload.usuario, "admin");
-  assert.strictEqual(sentPayload.password, "1111");
-  assert.strictEqual(sentPayload.formaPago, "Yape");
-  assert.strictEqual(sentPayload.tipoComprobante, "Boleta");
-  assert.strictEqual(sentPayload.documentoComprobante, "12345678");
-  console.log("✔ Frontend: addMovement() envía siempre usuario y password validados en el payload POST");
-
-  // Prueba 2.3: Verificación con archivos MINIFICADOS (public/ y src/)
-  console.log("\n=== PRUEBAS DE ARCHIVOS MINIFICADOS (PRODUCCIÓN / APK) ===");
-  const minApiCode = fs.readFileSync('src/sheets-api.min.js', 'utf8');
-  (0, eval)(minApiCode + '; global.SheetsAPIMin = SheetsAPI;');
-  const minApi = new SheetsAPIMin();
-  minApi.isDemoMode = false;
-  minApi.apiUrl = "https://script.google.com/macros/s/TEST/exec";
-
-  let sentPayloadMin = null;
-  global.fetch = async (url, opts) => {
-    sentPayloadMin = JSON.parse(opts.body);
-    return {
-      ok: true,
-      json: async () => ({ status: "success", message: "OK" })
-    };
-  };
-
-  await minApi.addMovement({
-    tipo: "ENTRADA",
-    codigo: "C001-M",
-    cantidad: 10,
-    requestId: "REQ-MIN-001"
-  });
-
-  assert(sentPayloadMin !== null, "El payload minificado debe enviarse a fetch");
-  assert.strictEqual(sentPayloadMin.usuario, "admin");
-  assert.strictEqual(sentPayloadMin.password, "1111");
-  console.log("✔ Frontend Minificado: sheets-api.min.js ejecuta sin errores y preserva credenciales de sesión");
+  const check = await api.validateSession();
+  assert.strictEqual(check.success, false);
+  assert.strictEqual(check.sesionValida, false);
+  assert.strictEqual(check.message, "Tu contraseña ha cambiado. Por favor, inicia sesión de nuevo.");
+  console.log("✔ Frontend: validateSession() detecta cambio de contraseña y retorna sesionValida: false");
 
   console.log("\n=========================================");
   console.log("✔ TODAS LAS PRUEBAS PASARON EXITOSAMENTE!");

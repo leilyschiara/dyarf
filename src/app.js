@@ -88,16 +88,6 @@ function bindGlobalEvents() {
     });
   }
 
-  // Botón Demo Login
-  const demoLoginBtn = document.getElementById("demo-login-btn");
-  if (demoLoginBtn) {
-    demoLoginBtn.addEventListener("click", () => {
-      document.getElementById("login-user").value = "admin";
-      document.getElementById("login-password").value = "1111";
-      handleLoginSubmit(new Event("submit"));
-    });
-  }
-
   // Configuración de API desde Login
   const configBtnLogin = document.getElementById("config-btn-login");
   if (configBtnLogin) {
@@ -479,9 +469,56 @@ function switchTab(tabId) {
     renderSettingsView();
   }
 
-  // 2. Carga automática en segundo plano al entrar en Inicio ("dashboard") o "stock"
+  // 2. Validación asíncrona de sesión con Google Apps Script en cada evento de navegación (sin timers/setInterval)
+  checkSessionOnNavigation();
+
+  // 3. Carga automática en segundo plano al entrar en Inicio ("dashboard") o "stock"
   if (tabId === "dashboard" || tabId === "stock") {
     triggerBackgroundSync(tabId);
+  }
+}
+
+let _isCheckingSession = false;
+/**
+ * Valida de forma asíncrona en cada evento de navegación si la contraseña del usuario en Google Sheets
+ * sigue siendo válida o fue modificada.
+ * NO utiliza temporizador ni setInterval.
+ */
+async function checkSessionOnNavigation() {
+  if (!AppState.user || _isCheckingSession) return;
+  if (!window.api || !window.api.apiUrl) return;
+
+  _isCheckingSession = true;
+  try {
+    const res = await window.api.validateSession();
+
+    // Si la respuesta indica que la contraseña cambió o la sesión ya no es válida
+    if (res && (res.sesionValida === false || res.success === false)) {
+      console.warn("Sesión inválida detectada al navegar:", res);
+
+      // 1. Borrar datos de la sesión actual (sessionStorage y localStorage)
+      window.api.logout();
+      try {
+        localStorage.removeItem("dcamisas_current_user");
+        if (typeof sessionStorage !== "undefined") {
+          sessionStorage.clear();
+        }
+      } catch (e) {}
+      AppState.user = null;
+
+      // 2. Redirigir inmediatamente a la pantalla de login
+      showLoginView();
+
+      // 3. Mostrar la alerta requerida
+      const errorMsg = res.message || "Tu contraseña ha cambiado. Por favor, inicia sesión de nuevo.";
+      showLoginAlert(errorMsg, "error");
+      showToast(errorMsg, "error");
+      alert(errorMsg);
+    }
+  } catch (err) {
+    console.warn("Aviso en validación de sesión durante navegación:", err);
+  } finally {
+    _isCheckingSession = false;
   }
 }
 
@@ -529,15 +566,21 @@ async function handleLoginSubmit(e) {
   try {
     const result = await window.api.login(userVal, passVal);
 
+    // Limpiar inmediatamente el campo de contraseña del formulario por seguridad
+    const passInput = document.getElementById("login-password");
+    if (passInput) passInput.value = "";
+
     if (result.success && result.user) {
       AppState.user = result.user;
-      showToast(`¡Bienvenido, ${result.user.usuario}!`, "success");
+      showToast(result.message || `¡Bienvenido, ${result.user.usuario}!`, "success");
       showMainApp();
       await loadAppData();
     } else {
-      showLoginAlert(result.message || "Error al iniciar sesión.", "error");
+      showLoginAlert(result.message || "Usuario o contraseña incorrectos.", "error");
     }
   } catch (err) {
+    const passInput = document.getElementById("login-password");
+    if (passInput) passInput.value = "";
     showLoginAlert(`Error de conexión: ${err.message}`, "error");
   } finally {
     submitBtn.disabled = false;
@@ -1590,11 +1633,9 @@ async function handleMovementSubmit(e) {
   try {
     const activeCreds = (window.api && window.api.getCurrentUserCredentials) ? window.api.getCurrentUserCredentials() : null;
     const activeUsuario = (AppState.user && AppState.user.usuario) || (activeCreds && activeCreds.usuario) || "Admin";
-    const activePassword = (AppState.user && AppState.user.password) || (activeCreds && activeCreds.password) || "";
 
     const payload = {
       usuario: activeUsuario,
-      password: activePassword,
       tipo: tipo,
       codigo: codigo,
       articulo: selectedArticulo || "",

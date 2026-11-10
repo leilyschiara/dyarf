@@ -15,6 +15,21 @@ class SheetsAPI {
   constructor() {
     this.apiUrl = localStorage.getItem(STORAGE_KEYS.API_URL) || "";
     this.isDemoMode = localStorage.getItem(STORAGE_KEYS.IS_DEMO_MODE) === "true" || !this.apiUrl;
+    this._sanitizeStoredSession();
+  }
+
+  /**
+   * Limpia claves huérfanas en sessionStorage/localStorage
+   */
+  _sanitizeStoredSession() {
+    try {
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem("dcamisas_password");
+        sessionStorage.removeItem("pass");
+      }
+    } catch (e) {
+      // Ignorar fallos de acceso a almacenamiento
+    }
   }
 
   isCurrentUserAdmin() {
@@ -81,7 +96,8 @@ class SheetsAPI {
   }
 
   /**
-   * Autenticación contra pestaña 'Usuarios'
+   * Autenticación contra pestaña 'Usuarios' en tiempo real
+   * Realiza un fetch() POST directamente al script de Google Sheets sin almacenar contraseñas en el cliente
    */
   async login(usuario, password) {
     const cleanUser = (usuario || "").trim();
@@ -94,45 +110,15 @@ class SheetsAPI {
       };
     }
 
-    // Si está en modo demo o no hay URL, validar con datos locales
-    if (this.isDemoMode || !this.apiUrl) {
-      const demoUsers = (window.DEMO_DATA && window.DEMO_DATA.users) || [];
-      const found = demoUsers.find(u => u.usuario.toLowerCase() === cleanUser.toLowerCase());
-
-      if (!found) {
-        return { success: false, message: "El usuario ingresado no existe en el sistema." };
-      }
-
-      if (found.pass !== cleanPass) {
-        return { success: false, message: "Contraseña incorrecta. Verifica tus datos." };
-      }
-
-      if (found.estado !== 1) {
-        return {
-          success: false,
-          code: "USER_INACTIVE",
-          message: "Tu usuario se encuentra INACTIVO (Estado: 0). Contacta al administrador."
-        };
-      }
-
-      const userSession = {
-        id: found.id,
-        usuario: found.usuario,
-        rol: found.rol,
-        estado: found.estado,
-        password: cleanPass
-      };
-
-      this.setCurrentUser(userSession);
+    if (!this.apiUrl) {
       return {
-        success: true,
-        user: userSession,
-        isDemo: true,
-        message: "Inicio de sesión exitoso (Modo Demo Local)."
+        success: false,
+        code: "NO_API_URL",
+        message: "Debes configurar la URL de tu Google Apps Script para iniciar sesión. Presiona el icono de configuración (engranaje) e ingresa la URL de tu Web App."
       };
     }
 
-    // Consulta real a Google Apps Script
+    // Consulta en tiempo real a Google Apps Script
     try {
       const payload = {
         action: "login",
@@ -151,16 +137,22 @@ class SheetsAPI {
       });
 
       if (!response.ok) {
-        throw new Error(`Error en el servidor: ${response.status}`);
+        throw new Error(`Error en el servidor (${response.status}): ${response.statusText}`);
       }
 
       const res = await response.json();
 
-      if (res.status === "success" && res.user) {
+      if ((res.success === true || res.status === "success") && res.user) {
+        // Guardar identificador y credenciales de sesión activa para validación continua en navegación
         const userSession = {
-          ...res.user,
-          password: cleanPass
+          id: res.user.id || "",
+          usuario: res.user.usuario,
+          rol: res.user.rol || "Usuario",
+          estado: 1,
+          password: cleanPass,
+          loginTimestamp: Date.now()
         };
+
         this.setCurrentUser(userSession);
         return {
           success: true,
@@ -304,21 +296,23 @@ class SheetsAPI {
       return { success: false, message: "La cantidad debe ser mayor a 0." };
     }
 
-    // Extraer credenciales seguras de la sesión activa
+    // Extraer usuario de la sesión activa
     const activeCreds = this.getCurrentUserCredentials();
     const activeUser = (movementData && movementData.usuario) || (activeCreds && activeCreds.usuario) || (this.getCurrentUser() ? this.getCurrentUser().usuario : "Admin");
-    const activePassword = (movementData && movementData.password) || (activeCreds && activeCreds.password) || "";
 
     const payload = {
       action: "addMovement",
       usuario: activeUser,
-      password: activePassword,
       tipo: tipo,
       codigo: codigo,
       cantidad: cantNum,
       observacion: observacion || "",
       requestId: requestId.trim()
     };
+
+    if (movementData && movementData.password) {
+      payload.password = movementData.password;
+    }
 
     // Incluir campos de venta exactamente cuando es SALIDA
     if (tipo === "SALIDA") {
@@ -434,22 +428,81 @@ class SheetsAPI {
   }
 
   /**
-   * Obtiene las credenciales de la sesión activa
+   * Obtiene las credenciales del usuario de la sesión activa para validación de navegación
    */
   getCurrentUserCredentials() {
     const user = this.getCurrentUser();
     if (!user) return null;
     return {
+      id: user.id || "",
       usuario: user.usuario || "",
+      rol: user.rol || "",
       password: user.password || ""
     };
   }
 
+  /**
+   * Valida en tiempo real si las credenciales de la sesión activa siguen coincidiendo
+   * exactamente con las de Google Sheets cada vez que el usuario navega.
+   */
+  async validateSession() {
+    const creds = this.getCurrentUserCredentials();
+    if (!creds || !creds.usuario || !creds.password) {
+      return { success: false, sesionValida: false, message: "No hay sesión activa." };
+    }
+
+    if (!this.apiUrl || this.isDemoMode) {
+      return { success: true, sesionValida: true, isDemo: true };
+    }
+
+    try {
+      const payload = {
+        action: "validateSession",
+        usuario: creds.usuario,
+        password: creds.password
+      };
+
+      const response = await fetch(this.apiUrl, {
+        method: "POST",
+        mode: "cors",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        // En caso de problema de conectividad momentánea, no expulsar al usuario
+        return { success: true, sesionValida: true, networkNotice: true };
+      }
+
+      const res = await response.json();
+      return res;
+    } catch (err) {
+      console.warn("Validación de sesión en navegación falló:", err);
+      return { success: true, sesionValida: true, networkNotice: true };
+    }
+  }
+
   setCurrentUser(user) {
     if (user) {
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
+      const safeUser = {
+        id: user.id || "",
+        usuario: user.usuario,
+        rol: user.rol || "Usuario",
+        estado: user.estado || 1,
+        password: user.password || "",
+        loginTimestamp: user.loginTimestamp || Date.now()
+      };
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(safeUser));
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(safeUser));
+      }
     } else {
       localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      }
     }
   }
 

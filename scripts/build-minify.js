@@ -351,19 +351,19 @@ function processFile(srcPath, destPaths) {
 const filesToMinify = [
   {
     src: 'src/logo-data.js',
-    dest: ['src/logo-data.min.js', 'public/logo-data.min.js', 'www/src/logo-data.min.js']
+    dest: ['src/logo-data.min.js', 'public/logo-data.min.js', 'www/src/logo-data.min.js', 'www/src/logo-data.js']
   },
   {
     src: 'src/data-demo.js',
-    dest: ['src/data-demo.min.js', 'public/data-demo.min.js', 'www/src/data-demo.min.js']
+    dest: ['src/data-demo.min.js', 'public/data-demo.min.js', 'www/src/data-demo.min.js', 'www/src/data-demo.js']
   },
   {
     src: 'src/sheets-api.js',
-    dest: ['src/sheets-api.min.js', 'public/sheets-api.min.js', 'www/src/sheets-api.min.js']
+    dest: ['src/sheets-api.min.js', 'public/sheets-api.min.js', 'www/src/sheets-api.min.js', 'www/src/sheets-api.js']
   },
   {
     src: 'src/app.js',
-    dest: ['src/app.min.js', 'public/app.min.js', 'www/src/app.min.js']
+    dest: ['src/app.min.js', 'public/app.min.js', 'www/src/app.min.js', 'www/src/app.js']
   }
 ];
 
@@ -392,8 +392,13 @@ console.log('--- GENERANDO DIRECTORIO WWW PARA CAPACITOR ---');
 copyRecursive('src/styles.css', 'www/src/styles.css');
 copyRecursive('index.html', 'www/index.html');
 copyRecursive('manifest.webmanifest', 'www/manifest.webmanifest');
+copyRecursive('manifest.webmanifest', 'www/manifest.json');
+copyRecursive('manifest.webmanifest', 'manifest.json');
 copyRecursive('sw.js', 'www/sw.js');
 copyRecursive('public', 'www/public');
 copyRecursive('assets', 'www/assets');
+if (fs.existsSync('D_Camisas_App_Portable.html')) {
+  copyRecursive('D_Camisas_App_Portable.html', 'www/D_Camisas_App_Portable.html');
+}
 console.log('--- DIRECTORIO WWW PREPARADO EXITOSAMENTE ---');
 console.log('--- MINIFICACIÓN COMPLETADA EXITOSAMENTE ---');

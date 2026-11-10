@@ -1,21 +1,25 @@
 {
-  "name": "DYARF Inventario",
-  "short_name": "DYARF",
+  "name": "D'Camisas - Inventario & Ventas",
+  "short_name": "D'Camisas",
+  "description": "Sistema móvil de control de stock y registro de ventas para D'Camisas",
   "start_url": "./index.html",
   "display": "standalone",
+  "orientation": "portrait-primary",
   "background_color": "#ffffff",
-  "theme_color": "#9d174d",
-  "description": "Sistema de gestión de inventario y ventas DYARF",
+  "theme_color": "#be185d",
+  "categories": ["business", "productivity", "shopping"],
   "icons": [
     {
-      "src": "./assets/icon-192.png",
+      "src": "public/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     },
     {
-      "src": "./assets/icon-512.png",
+      "src": "public/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ]
 }

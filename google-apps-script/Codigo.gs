@@ -75,8 +75,25 @@ function doGet(e) {
         break;
 
       case "login":
-        // Soporte de login vía GET (opcional, útil para pruebas rápidas)
-        responseData = handleLogin(params.usuario, params.password);
+        // Soporte de login vía GET protegido con LockService y lectura en tiempo real
+        const getLock = LockService.getScriptLock();
+        let hasGetLock = false;
+        try {
+          hasGetLock = getLock.tryLock(10000);
+        } catch (e) {
+          hasGetLock = false;
+        }
+        try {
+          responseData = handleLogin(params.usuario, params.password);
+        } finally {
+          if (hasGetLock) {
+            try { getLock.releaseLock(); } catch (e) {}
+          }
+        }
+        break;
+
+      case "validateSession":
+        responseData = handleValidateSession(params.usuario, params.password);
         break;
 
       case "setup":
@@ -145,6 +162,10 @@ function doPost(e) {
         responseData = handleLogin(payload.usuario, payload.password);
         break;
 
+      case "validateSession":
+        responseData = handleValidateSession(payload.usuario, payload.password, true);
+        break;
+
       case "addMovement":
         responseData = handleAddMovement(payload);
         break;
@@ -188,22 +209,27 @@ function doPost(e) {
 
 /**
  * Función de autenticación de usuario
- * Valida USUARIO, CONTRASEÑA y ESTADO (debe ser 1)
+ * Valida USUARIO, CONTRASEÑA y ESTADO (debe ser 1) directamente en la pestaña 'Usuarios' en tiempo real
  */
 function handleLogin(usuario, password) {
   if (!usuario || !password) {
     return {
+      success: false,
       status: "error",
       code: "EMPTY_FIELDS",
       message: "Por favor, ingresa tu usuario y contraseña."
     };
   }
 
+  // Forzar vaciado de buffers para garantizar lectura fresca y en tiempo real
+  SpreadsheetApp.flush();
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEETS.USERS);
 
   if (!sheet) {
     return {
+      success: false,
       status: "error",
       code: "NO_SHEET",
       message: "La pestaña 'Usuarios' no existe en Google Sheets. Ejecuta setupSheet."
@@ -213,6 +239,7 @@ function handleLogin(usuario, password) {
   const data = sheet.getDataRange().getValues();
   if (data.length <= 1) {
     return {
+      success: false,
       status: "error",
       code: "NO_USERS",
       message: "No hay usuarios registrados en la base de datos."
@@ -228,6 +255,7 @@ function handleLogin(usuario, password) {
 
   if (colUser === -1 || colPass === -1 || colState === -1) {
     return {
+      success: false,
       status: "error",
       code: "INVALID_STRUCTURE",
       message: "Las columnas 'USUARIO', 'CONTRASEÑA' y 'ESTADO' son obligatorias en 'Usuarios'."
@@ -239,20 +267,21 @@ function handleLogin(usuario, password) {
 
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    const sheetUser = String(row[colUser]).trim().toLowerCase();
-    const sheetPass = String(row[colPass]).trim();
-    const sheetState = String(row[colState]).trim();
+    const sheetUser = String(row[colUser] !== null && row[colUser] !== undefined ? row[colUser] : "").trim().toLowerCase();
+    const sheetPass = String(row[colPass] !== null && row[colPass] !== undefined ? row[colPass] : "").trim();
+    const sheetState = String(row[colState] !== null && row[colState] !== undefined ? row[colState] : "").trim();
 
     if (sheetUser === inputUser) {
-      // Usuario encontrado, verificar contraseña
+      // Usuario encontrado, verificar contraseña exacta en tiempo real
       if (sheetPass === inputPass) {
-        // Verificar estado (debe ser 1)
-        if (sheetState === "1" || sheetState === 1 || sheetState === "ACTIVO" || sheetState === "Activo") {
+        // Verificar estado (debe ser 1 o ACTIVO)
+        if (sheetState === "1" || sheetState === 1 || sheetState.toUpperCase() === "ACTIVO") {
           return {
+            success: true,
             status: "success",
             message: "Inicio de sesión exitoso.",
             user: {
-              id: colId !== -1 ? row[colId] : i,
+              id: colId !== -1 ? String(row[colId]).trim() : ("USR-" + i),
               usuario: String(row[colUser]).trim(),
               rol: colRole !== -1 && row[colRole] ? String(row[colRole]).trim() : "Usuario",
               estado: 1
@@ -260,6 +289,7 @@ function handleLogin(usuario, password) {
           };
         } else {
           return {
+            success: false,
             status: "error",
             code: "USER_INACTIVE",
             message: "Tu usuario se encuentra INACTIVO (Estado: 0). Contacta al administrador."
@@ -267,6 +297,7 @@ function handleLogin(usuario, password) {
         }
       } else {
         return {
+          success: false,
           status: "error",
           code: "INVALID_PASSWORD",
           message: "Contraseña incorrecta. Por favor verifica tus datos."
@@ -276,6 +307,203 @@ function handleLogin(usuario, password) {
   }
 
   return {
+    success: false,
+    status: "error",
+    code: "USER_NOT_FOUND",
+    message: "El usuario ingresado no existe en el sistema."
+  };
+}
+
+/**
+ * Valida de forma ultra rápida si la sesión del usuario sigue vigente y si la contraseña coincide exactamente
+ * con la registrada en la pestaña 'Usuarios' de Google Sheets.
+ * Lee únicamente el rango de usuarios para máxima rapidez y utiliza LockService.
+ */
+function handleValidateSession(usuario, password, lockAlreadyAcquired) {
+  const cleanUser = String(usuario || "").trim().toLowerCase();
+  const cleanPass = String(password || "").trim();
+
+  if (!cleanUser || !cleanPass) {
+    return {
+      success: false,
+      sesionValida: false,
+      code: "EMPTY_CREDENTIALS",
+      message: "Credenciales de sesión no proporcionadas."
+    };
+  }
+
+  let localLock = null;
+  let hasLocalLock = false;
+  if (!lockAlreadyAcquired) {
+    localLock = LockService.getScriptLock();
+    try {
+      hasLocalLock = localLock.tryLock(5000);
+    } catch (e) {
+      hasLocalLock = false;
+    }
+  }
+
+  try {
+    SpreadsheetApp.flush();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEETS.USERS);
+
+    if (!sheet) {
+      return {
+        success: false,
+        sesionValida: false,
+        code: "NO_SHEET",
+        message: "Pestaña 'Usuarios' no encontrada en Google Sheets."
+      };
+    }
+
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    if (lastRow <= 1) {
+      return {
+        success: false,
+        sesionValida: false,
+        code: "NO_USERS",
+        message: "No hay usuarios registrados."
+      };
+    }
+
+    // Leemos estrictamente el rango de usuarios para máxima rapidez
+    const data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+    const headers = data[0].map(h => String(h).trim().toUpperCase());
+    const colId = headers.indexOf("ID");
+    const colUser = headers.indexOf("USUARIO");
+    const colPass = headers.indexOf("CONTRASEÑA") !== -1 ? headers.indexOf("CONTRASEÑA") : headers.indexOf("PASSWORD");
+    const colState = headers.indexOf("ESTADO");
+    const colRole = headers.indexOf("ROL");
+
+    if (colUser === -1 || colPass === -1 || colState === -1) {
+      return {
+        success: false,
+        sesionValida: false,
+        code: "INVALID_STRUCTURE",
+        message: "Estructura de la pestaña 'Usuarios' no válida."
+      };
+    }
+
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const sheetUser = String(row[colUser] !== null && row[colUser] !== undefined ? row[colUser] : "").trim().toLowerCase();
+      const sheetPass = String(row[colPass] !== null && row[colPass] !== undefined ? row[colPass] : "").trim();
+      const sheetState = String(row[colState] !== null && row[colState] !== undefined ? row[colState] : "").trim();
+
+      if (sheetUser === cleanUser) {
+        // Verificar si la contraseña cambió en Google Sheets
+        if (sheetPass !== cleanPass) {
+          return {
+            success: false,
+            sesionValida: false,
+            code: "PASSWORD_CHANGED",
+            message: "Tu contraseña ha cambiado. Por favor, inicia sesión de nuevo."
+          };
+        }
+
+        // Verificar si el usuario sigue activo
+        if (sheetState === "1" || sheetState === 1 || sheetState.toUpperCase() === "ACTIVO") {
+          return {
+            success: true,
+            sesionValida: true,
+            message: "Sesión válida y actualizada.",
+            user: {
+              id: colId !== -1 ? String(row[colId]).trim() : ("USR-" + i),
+              usuario: String(row[colUser]).trim(),
+              rol: colRole !== -1 && row[colRole] ? String(row[colRole]).trim() : "Usuario",
+              estado: 1
+            }
+          };
+        } else {
+          return {
+            success: false,
+            sesionValida: false,
+            code: "USER_INACTIVE",
+            message: "Tu usuario se encuentra inactivo. Contacta al administrador."
+          };
+        }
+      }
+    }
+
+    return {
+      success: false,
+      sesionValida: false,
+      code: "USER_NOT_FOUND",
+      message: "Tu usuario no fue encontrado en Google Sheets."
+    };
+
+  } finally {
+    if (hasLocalLock && localLock) {
+      try {
+        localLock.releaseLock();
+      } catch (e) {}
+    }
+  }
+}
+
+/**
+ * Valida en tiempo real que un usuario exista y esté activo en la pestaña 'Usuarios'
+ */
+function validateActiveUser(usuario) {
+  const cleanUser = String(usuario || "").trim().toLowerCase();
+  if (!cleanUser) {
+    return { success: false, status: "error", code: "EMPTY_USER", message: "Usuario no especificado." };
+  }
+
+  SpreadsheetApp.flush();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.USERS);
+  if (!sheet) {
+    return { success: false, status: "error", code: "NO_SHEET", message: "Pestaña 'Usuarios' no encontrada." };
+  }
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    return { success: false, status: "error", code: "NO_USERS", message: "No hay usuarios registrados." };
+  }
+
+  const headers = data[0].map(h => String(h).trim().toUpperCase());
+  const colUser = headers.indexOf("USUARIO");
+  const colState = headers.indexOf("ESTADO");
+  const colRole = headers.indexOf("ROL");
+  const colId = headers.indexOf("ID");
+
+  if (colUser === -1 || colState === -1) {
+    return { success: false, status: "error", code: "INVALID_STRUCTURE", message: "Columnas requeridas no encontradas." };
+  }
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const sheetUser = String(row[colUser] !== null && row[colUser] !== undefined ? row[colUser] : "").trim().toLowerCase();
+    const sheetState = String(row[colState] !== null && row[colState] !== undefined ? row[colState] : "").trim();
+
+    if (sheetUser === cleanUser) {
+      if (sheetState === "1" || sheetState === 1 || sheetState.toUpperCase() === "ACTIVO") {
+        return {
+          success: true,
+          status: "success",
+          user: {
+            id: colId !== -1 ? String(row[colId]).trim() : ("USR-" + i),
+            usuario: String(row[colUser]).trim(),
+            rol: colRole !== -1 && row[colRole] ? String(row[colRole]).trim() : "Usuario",
+            estado: 1
+          }
+        };
+      } else {
+        return {
+          success: false,
+          status: "error",
+          code: "USER_INACTIVE",
+          message: "Tu usuario se encuentra INACTIVO (Estado: 0). Contacta al administrador."
+        };
+      }
+    }
+  }
+
+  return {
+    success: false,
     status: "error",
     code: "USER_NOT_FOUND",
     message: "El usuario ingresado no existe en el sistema."
@@ -352,28 +580,46 @@ function handleAddMovement(payload) {
   const inputUsuario = String(payload.usuario || "").trim();
   const inputPassword = String(payload.password || "").trim();
 
-  if (!inputUsuario || !inputPassword) {
+  if (!inputUsuario) {
     return {
+      success: false,
       status: "error",
       code: "AUTH_REQUIRED",
-      message: "Credenciales requeridas: Debes proporcionar usuario y contraseña válidos para registrar movimientos."
+      message: "Credenciales requeridas: Debes iniciar sesión para registrar movimientos."
     };
   }
 
-  // Validar credenciales y estado activo contra la pestaña 'Usuarios'
-  const authCheck = handleLogin(inputUsuario, inputPassword);
-  if (authCheck.status !== "success" || !authCheck.user) {
-    return {
-      status: "error",
-      code: authCheck.code || "UNAUTHORIZED",
-      message: "Acceso no autorizado: " + (authCheck.message || "Usuario o contraseña inválidos, o usuario inactivo.")
-    };
+  // Validar usuario y estado activo contra la pestaña 'Usuarios' en tiempo real
+  let authUser = null;
+  if (inputPassword) {
+    const authCheck = handleLogin(inputUsuario, inputPassword);
+    if (!authCheck.success || !authCheck.user) {
+      return {
+        success: false,
+        status: "error",
+        code: authCheck.code || "UNAUTHORIZED",
+        message: "Acceso no autorizado: " + (authCheck.message || "Usuario o contraseña inválidos, o usuario inactivo.")
+      };
+    }
+    authUser = authCheck.user;
+  } else {
+    const userCheck = validateActiveUser(inputUsuario);
+    if (!userCheck.success || !userCheck.user) {
+      return {
+        success: false,
+        status: "error",
+        code: userCheck.code || "UNAUTHORIZED",
+        message: "Acceso no autorizado: " + (userCheck.message || "Usuario inválido o inactivo.")
+      };
+    }
+    authUser = userCheck.user;
   }
 
   // 2. Validar identificador de idempotencia (requestId obligatorio)
   const requestId = String(payload.requestId || "").trim();
   if (!requestId) {
     return {
+      success: false,
       status: "error",
       code: "MISSING_REQUEST_ID",
       message: "Identificador de solicitud (requestId) obligatorio para registrar movimientos."
@@ -381,7 +627,7 @@ function handleAddMovement(payload) {
   }
 
   // 3. Validar parámetros básicos
-  const usuario = authCheck.user.usuario; // Usar el usuario verificado por la sesión
+  const usuario = authUser.usuario; // Usar el usuario verificado por la sesión
   const tipo = String(payload.tipo || "").trim().toUpperCase(); // 'ENTRADA' o 'SALIDA'
   const codigo = String(payload.codigo || "").trim().toUpperCase();
   const cantidad = parseInt(payload.cantidad, 10);
