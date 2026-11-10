@@ -532,6 +532,7 @@ async function checkSessionOnNavigation() {
       // 1. Borrar datos de la sesión actual (sessionStorage y localStorage)
       window.api.logout();
       try {
+        localStorage.removeItem("dyarf_current_user");
         localStorage.removeItem("dcamisas_current_user");
         if (typeof sessionStorage !== "undefined") {
           sessionStorage.clear();

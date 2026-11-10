@@ -1,8 +1,8 @@
 {
   "id": "/dyarf/",
-  "name": "D'Camisas - Inventario & Ventas",
-  "short_name": "D'Camisas",
-  "description": "Sistema móvil de control de stock y registro de ventas para D'Camisas",
+  "name": "Dyarf - Inventario & Ventas",
+  "short_name": "Dyarf",
+  "description": "Sistema móvil de control de stock y registro de ventas para Dyarf",
   "lang": "es",
   "dir": "ltr",
   "start_url": "./index.html",
@@ -44,7 +44,7 @@
       "sizes": "512x512",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "D'Camisas Inventario & Ventas"
+      "label": "Dyarf Inventario & Ventas"
     }
   ]
 }

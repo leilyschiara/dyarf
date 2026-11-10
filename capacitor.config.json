@@ -1,6 +1,6 @@
 {
-  "appId": "com.dcamisas.app",
-  "appName": "D'Camisas",
+  "appId": "com.dyarf.app",
+  "appName": "Dyarf",
   "webDir": "www",
   "server": {
     "androidScheme": "https",

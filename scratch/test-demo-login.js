@@ -53,7 +53,7 @@ async function runTests() {
   const testUrl = "https://script.google.com/macros/s/AKfycbxTest/exec";
   api.setApiUrl(testUrl);
   console.assert(api.getApiUrl() === testUrl, "URL debe haberse guardado");
-  console.assert(localStorage.getItem("dcamisas_api_url") === testUrl, "URL en localStorage");
+  console.assert(localStorage.getItem("dyarf_api_url") === testUrl, "URL en localStorage");
   console.log("✔ Demo admin puede configurar y guardar la URL de Apps Script");
 
   // 5. Logout y probar configuración de URL pre-login (pantalla inicial)

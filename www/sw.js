@@ -1,4 +1,4 @@
-const CACHE_NAME = "dcamisas-cache-v5.8";
+const CACHE_NAME = "dyarf-cache-v6.0";
 const ASSETS_TO_CACHE = [
   "./",
   "./index.html",

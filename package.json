@@ -1,7 +1,7 @@
 {
-  "name": "dcamisas-app",
+  "name": "dyarf-app",
   "version": "1.0.0",
-  "description": "Aplicación móvil de gestión de inventario y ventas para D'Camisas conectada a Google Sheets",
+  "description": "Aplicación móvil de gestión de inventario y ventas para Dyarf conectada a Google Sheets",
   "main": "index.html",
   "scripts": {
     "start": "npx serve . -p 3000",
@@ -23,7 +23,7 @@
     "apk",
     "pwa"
   ],
-  "author": "D'Camisas",
+  "author": "Dyarf",
   "license": "MIT",
   "dependencies": {
     "@capacitor/android": "^6.0.0",

@@ -4,17 +4,17 @@
  */
 
 const STORAGE_KEYS = {
-  API_URL: "dcamisas_api_url",
-  CURRENT_USER: "dcamisas_current_user",
-  STOCK_CACHE: "dcamisas_stock_cache",
-  MOVEMENTS_CACHE: "dcamisas_movements_cache",
-  IS_DEMO_MODE: "dcamisas_is_demo_mode"
+  API_URL: "dyarf_api_url",
+  CURRENT_USER: "dyarf_current_user",
+  STOCK_CACHE: "dyarf_stock_cache",
+  MOVEMENTS_CACHE: "dyarf_movements_cache",
+  IS_DEMO_MODE: "dyarf_is_demo_mode"
 };
 
 class SheetsAPI {
   constructor() {
-    this.apiUrl = localStorage.getItem(STORAGE_KEYS.API_URL) || "";
-    this.isDemoMode = localStorage.getItem(STORAGE_KEYS.IS_DEMO_MODE) === "true" || !this.apiUrl;
+    this.apiUrl = localStorage.getItem(STORAGE_KEYS.API_URL) || localStorage.getItem("dcamisas_api_url") || "";
+    this.isDemoMode = (localStorage.getItem(STORAGE_KEYS.IS_DEMO_MODE) || localStorage.getItem("dcamisas_is_demo_mode")) === "true" || !this.apiUrl;
     this._sanitizeStoredSession();
   }
 
@@ -24,6 +24,7 @@ class SheetsAPI {
   _sanitizeStoredSession() {
     try {
       if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem("dyarf_password");
         sessionStorage.removeItem("dcamisas_password");
         sessionStorage.removeItem("pass");
       }
@@ -446,7 +447,9 @@ class SheetsAPI {
 
   getCurrentUser() {
     try {
-      const u = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+      const u = localStorage.getItem(STORAGE_KEYS.CURRENT_USER) || 
+                (typeof sessionStorage !== "undefined" ? sessionStorage.getItem(STORAGE_KEYS.CURRENT_USER) : null) ||
+                localStorage.getItem("dcamisas_current_user");
       return u ? JSON.parse(u) : null;
     } catch (e) {
       return null;
