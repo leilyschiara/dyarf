@@ -1760,18 +1760,20 @@ body {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.type-btn.active.entrada {
-  border: 2px solid var(--success);
-  background: #ffffff;
-  color: var(--success);
-  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.2);
+.type-btn.active.entrada,
+#btn-tipo-entrada.active {
+  border-color: var(--success);
+  background: var(--success-bg);
+  color: #065f46;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
 }
 
-.type-btn.active.salida {
-  border: 2px solid var(--primary);
-  background: #ffffff;
+.type-btn.active.salida,
+#btn-tipo-salida.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
   color: var(--primary);
-  box-shadow: 0 4px 14px var(--primary-glow);
+  box-shadow: 0 4px 12px var(--primary-glow);
 }
 
 /* Selector de Tallas (4 Botones: S, M, L, XL) */
@@ -1819,7 +1821,7 @@ body {
 }
 
 .size-btn.active {
-  border: 2px solid var(--primary);
+  border: 1px solid #d3276e;
   background: #ffffff;
   color: #000000;
   box-shadow: 0 4px 14px var(--primary-glow);
@@ -1827,7 +1829,7 @@ body {
 }
 
 .size-btn.active:hover {
-  border-color: var(--primary);
+  border-color: #d3276e;
   background: #ffffff;
   color: #000000;
 }
@@ -1896,7 +1898,7 @@ body {
 }
 
 .option-btn.active {
-  border: 2px solid var(--primary);
+  border: 1px solid #d3276e;
   background: #ffffff;
   color: #000000;
   box-shadow: 0 4px 14px var(--primary-glow);
@@ -1905,13 +1907,13 @@ body {
 }
 
 .option-btn.active:hover {
-  border-color: var(--primary);
+  border-color: #d3276e;
   background: #ffffff;
   color: #000000;
 }
 
 #entrada-obs-buttons .option-btn.active {
-  border: 2px solid var(--success);
+  border: 1px solid var(--success);
   background: #ffffff;
   color: #000000;
   box-shadow: 0 4px 14px rgba(16, 185, 129, 0.2);
